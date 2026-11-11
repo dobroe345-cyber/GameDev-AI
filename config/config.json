@@ -1,0 +1,15 @@
+{
+  "ai": {
+    "provider": "stub",
+    "model": "",
+    "base_url": "http://localhost:11434/v1",
+    "api_key_env": "AI_API_KEY"
+  },
+  "memory_db": "backend/memory.db",
+  "workspace_dir": "workspace",
+  "cors_origins": [
+    "http://localhost:5500",
+    "http://127.0.0.1:5500",
+    "https://YOUR_USERNAME.github.io"
+  ]
+}
