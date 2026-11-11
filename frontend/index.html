@@ -57,13 +57,28 @@
       <div class="settings-body">
         <h2 id="settingsTitle">Настройки</h2>
 
-        <label>Адрес бэкенда
-          <input id="sBackend" type="url" placeholder="https://… (пусто = демо-режим)">
+        <label>Откуда брать ответы ИИ
+          <select id="sProvider">
+            <option value="demo">Демо (без ИИ)</option>
+            <option value="anthropic">Anthropic (Claude) — нужен API-ключ</option>
+            <option value="openai">OpenAI-совместимый (OpenAI, OpenRouter, Groq…)</option>
+            <option value="backend">Свой сервер (backend)</option>
+          </select>
         </label>
-        <label>Модель
-          <input id="sModel" type="text" placeholder="default">
+        <label data-for="anthropic openai">API-ключ
+          <input id="sKey" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="вставь ключ">
+          <span class="muted">Ключ хранится только в этом браузере и уходит только выбранному сервису.</span>
         </label>
-        <label>Температура: <b id="sTempVal">0.7</b>
+        <label data-for="openai">Адрес API
+          <input id="sBase" type="url" autocapitalize="off" placeholder="https://api.openai.com/v1">
+        </label>
+        <label data-for="backend">Адрес своего сервера
+          <input id="sBackend" type="url" autocapitalize="off" placeholder="https://…">
+        </label>
+        <label data-for="anthropic openai backend">Модель
+          <input id="sModel" type="text" autocapitalize="off" spellcheck="false" placeholder="по умолчанию">
+        </label>
+        <label>Температура: <b id="sTempVal">0.7</b> <span class="muted">(0.7 — по умолчанию у сервиса)</span>
           <input id="sTemp" type="range" min="0" max="2" step="0.1">
         </label>
         <label>Системная инструкция (необязательно)
@@ -106,6 +121,7 @@
 
   <div class="toast hidden" id="toast" role="status"></div>
 
+  <script src="providers.js"></script>
   <script src="script.js"></script>
 </body>
 </html>
