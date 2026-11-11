@@ -13,7 +13,10 @@
 
     <aside class="sidebar" id="sidebar" aria-label="Чаты">
       <div class="side-top">
-        <button class="btn primary wide" id="newChat" type="button">＋ Новый чат</button>
+        <div class="side-head">
+          <button class="btn primary" id="newChat" type="button">＋ Новый чат</button>
+          <button class="icon-btn" id="closeSide" type="button" aria-label="Скрыть панель" title="Скрыть панель">✕</button>
+        </div>
         <input class="search" id="search" type="search" placeholder="Поиск по чатам" aria-label="Поиск по чатам">
       </div>
       <nav class="chat-list" id="chatList"></nav>
@@ -24,11 +27,12 @@
 
     <main class="main">
       <header class="topbar">
-        <button class="icon-btn" id="menuBtn" type="button" aria-label="Меню">☰</button>
+        <button class="icon-btn" id="menuBtn" type="button" aria-label="Панель чатов" title="Панель чатов">☰</button>
         <div class="title" id="chatTitle">GameDev AI</div>
         <span class="badge" id="modeBadge">демо</span>
         <button class="icon-btn" id="exportBtn" type="button" aria-label="Экспорт чата" title="Экспорт чата">⤓</button>
         <button class="icon-btn" id="themeBtn" type="button" aria-label="Сменить тему" title="Тема">◐</button>
+        <button class="icon-btn" id="topSettings" type="button" aria-label="Настройки" title="Настройки">⚙</button>
       </header>
 
       <section class="messages" id="messages" aria-live="polite"></section>
@@ -43,49 +47,64 @@
           <textarea id="input" rows="1" placeholder="Напиши задачу для GameDev AI…" aria-label="Сообщение"></textarea>
           <button class="send" id="sendBtn" type="submit" aria-label="Отправить">➤</button>
         </form>
-        <div class="hint">Enter — отправить, Shift+Enter — новая строка. ИИ может ошибаться, проверяй код.</div>
+        <div class="hint">ИИ может ошибаться, проверяй код.</div>
       </footer>
     </main>
   </div>
 
-  <dialog id="settings">
-    <form method="dialog" class="settings-body" id="settingsForm">
-      <h2>Настройки</h2>
+  <div class="modal hidden" id="settings" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <div class="modal-card">
+      <div class="settings-body">
+        <h2 id="settingsTitle">Настройки</h2>
 
-      <label>Адрес бэкенда
-        <input id="sBackend" type="url" placeholder="http://localhost:8000 (пусто = демо-режим)">
-      </label>
-      <label>Модель
-        <input id="sModel" type="text" placeholder="default">
-      </label>
-      <label>Температура: <b id="sTempVal">0.7</b>
-        <input id="sTemp" type="range" min="0" max="2" step="0.1">
-      </label>
-      <label>Системная инструкция (необязательно)
-        <textarea id="sSystem" rows="4" placeholder="Переопределяет инструкцию с сервера"></textarea>
-      </label>
-      <label>Тема
-        <select id="sTheme">
-          <option value="auto">Как в системе</option>
-          <option value="dark">Тёмная</option>
-          <option value="light">Светлая</option>
-        </select>
-      </label>
+        <label>Адрес бэкенда
+          <input id="sBackend" type="url" placeholder="https://… (пусто = демо-режим)">
+        </label>
+        <label>Модель
+          <input id="sModel" type="text" placeholder="default">
+        </label>
+        <label>Температура: <b id="sTempVal">0.7</b>
+          <input id="sTemp" type="range" min="0" max="2" step="0.1">
+        </label>
+        <label>Системная инструкция (необязательно)
+          <textarea id="sSystem" rows="4" placeholder="Переопределяет инструкцию с сервера"></textarea>
+        </label>
+        <label>Тема
+          <select id="sTheme">
+            <option value="auto">Как в системе</option>
+            <option value="dark">Тёмная</option>
+            <option value="light">Светлая</option>
+          </select>
+        </label>
+        <label>Размер текста
+          <select id="sFont">
+            <option value="small">Мелкий</option>
+            <option value="normal">Обычный</option>
+            <option value="large">Крупный</option>
+          </select>
+        </label>
+        <label class="check">
+          <input id="sEnter" type="checkbox">
+          <span>Enter отправляет сообщение (Shift+Enter — новая строка)</span>
+        </label>
 
-      <div class="row">
-        <button class="btn" type="button" id="testBackend">Проверить связь</button>
-        <span id="testResult" class="muted"></span>
-      </div>
-      <div class="row">
-        <button class="btn danger" type="button" id="clearAll">Удалить все чаты</button>
-      </div>
+        <div class="row">
+          <button class="btn" type="button" id="testBackend">Проверить связь</button>
+          <span id="testResult" class="muted"></span>
+        </div>
+        <div class="row">
+          <button class="btn danger" type="button" id="clearAll">Удалить все чаты</button>
+        </div>
 
-      <div class="row end">
-        <button class="btn" value="cancel">Отмена</button>
-        <button class="btn primary" value="ok" id="saveSettings">Сохранить</button>
+        <div class="row end">
+          <button class="btn" type="button" id="cancelSettings">Отмена</button>
+          <button class="btn primary" type="button" id="saveSettings">Сохранить</button>
+        </div>
       </div>
-    </form>
-  </dialog>
+    </div>
+  </div>
+
+  <div class="toast hidden" id="toast" role="status"></div>
 
   <script src="script.js"></script>
 </body>
