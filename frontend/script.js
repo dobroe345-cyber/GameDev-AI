@@ -7,7 +7,10 @@
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* quota / private mode */ } },
   };
 
-  const DEFAULTS = { backend: '', model: 'default', temperature: 0.7, system: '', theme: 'auto' };
+  const DEFAULTS = {
+    backend: '', model: 'default', temperature: 0.7, system: '', theme: 'auto',
+    fontSize: 'normal', enterSend: window.matchMedia('(hover: hover)').matches,
+  };
   const MAX_FILE = 200 * 1024; // 200 KB per attached text file
 
   let settings = { ...DEFAULTS, ...store.get('gdai.settings', {}) };
@@ -20,7 +23,7 @@
   const els = {
     app: $('#app'), list: $('#chatList'), messages: $('#messages'), input: $('#input'),
     form: $('#composer'), send: $('#sendBtn'), title: $('#chatTitle'), badge: $('#modeBadge'),
-    chips: $('#chips'), search: $('#search'), toBottom: $('#toBottom'), dlg: $('#settings'),
+    chips: $('#chips'), search: $('#search'), toBottom: $('#toBottom'), modal: $('#settings'), toast: $('#toast'),
   };
 
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
@@ -252,7 +255,8 @@
     const last = history[history.length - 1]?.content || '';
     const preview = last.length > 200 ? last.slice(0, 200) + '…' : last;
     const text = `Сейчас включён **демо-режим**: бэкенд не подключён, поэтому настоящего ИИ-ответа нет.\n\nТвоё сообщение получено:\n\n> ${preview.replace(/\n/g, ' ')}\n\nЧтобы подключить ИИ, запусти сервер (\`uvicorn main:app\` в папке \`backend\`) и укажи его адрес в **Настройках**.\n\n\`\`\`js\n// пример: игровой цикл\nfunction loop(t) {\n  update(t);\n  render();\n  requestAnimationFrame(loop);\n}\nrequestAnimationFrame(loop);\n\`\`\``;
-    for (const tok of text.match(/\s*\S+/g) || []) {
+    const full = text + settingsInfo();
+    for (const tok of full.match(/\s*\S+/g) || []) {
       if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
       msg.content += tok; update();
       await new Promise(r => setTimeout(r, 18));
@@ -280,8 +284,32 @@
 
   /* ---------- UI helpers ---------- */
   function autosize() { els.input.style.height = 'auto'; els.input.style.height = Math.min(els.input.scrollHeight, 200) + 'px'; }
-  const openMenu = () => els.app.classList.add('menu-open');
+  const isMobile = () => window.matchMedia('(max-width: 800px)').matches;
+  function setCollapsed(v) { els.app.classList.toggle('side-collapsed', v); store.set('gdai.sideCollapsed', v); }
   function closeMenu() { els.app.classList.remove('menu-open'); }
+  function toggleSide() {
+    if (isMobile()) els.app.classList.toggle('menu-open');
+    else setCollapsed(!els.app.classList.contains('side-collapsed'));
+  }
+  function hideSide() { if (isMobile()) closeMenu(); else setCollapsed(true); }
+
+  let toastTimer = null;
+  function toast(text) {
+    els.toast.textContent = text;
+    els.toast.classList.remove('hidden');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => els.toast.classList.add('hidden'), 1800);
+  }
+
+  function applyFont() {
+    const px = { small: '14px', normal: '16px', large: '18px' }[settings.fontSize] || '16px';
+    document.documentElement.style.setProperty('--fs', px);
+  }
+
+  // Показывает в демо-режиме, какие настройки сейчас применяются
+  function settingsInfo() {
+    return `\n\n---\n**Текущие настройки:** модель — \`${settings.model}\`, температура — \`${settings.temperature}\`, системная инструкция — ${settings.system.trim() ? 'задана' : 'не задана'}.`;
+  }
 
   function applyTheme() {
     const t = settings.theme;
@@ -293,6 +321,7 @@
     const order = ['auto', 'dark', 'light'];
     settings.theme = order[(order.indexOf(settings.theme) + 1) % order.length];
     store.set('gdai.settings', settings); applyTheme();
+    toast('Тема: ' + { auto: 'как в системе', dark: 'тёмная', light: 'светлая' }[settings.theme]);
   }
 
   function openSettings() {
@@ -302,13 +331,38 @@
     $('#sTempVal').textContent = settings.temperature;
     $('#sSystem').value = settings.system;
     $('#sTheme').value = settings.theme;
+    $('#sFont').value = settings.fontSize;
+    $('#sEnter').checked = !!settings.enterSend;
     $('#testResult').textContent = '';
-    els.dlg.showModal();
+    els.modal.classList.remove('hidden');
+  }
+
+  function closeSettings() { els.modal.classList.add('hidden'); }
+
+  function saveSettings() {
+    const temp = parseFloat($('#sTemp').value);
+    settings = {
+      backend: $('#sBackend').value.trim(),
+      model: $('#sModel').value.trim() || 'default',
+      temperature: Number.isFinite(temp) ? temp : 0.7,
+      system: $('#sSystem').value,
+      theme: $('#sTheme').value,
+      fontSize: $('#sFont').value,
+      enterSend: $('#sEnter').checked,
+    };
+    store.set('gdai.settings', settings);
+    applyTheme(); applyFont(); renderBadge();
+    closeSettings();
+    toast('Настройки сохранены');
   }
 
   async function testBackend() {
     const out = $('#testResult'), url = $('#sBackend').value.trim().replace(/\/+$/, '');
     if (!url) { out.textContent = 'Адрес не указан — будет демо-режим'; return; }
+    if (location.protocol === 'https:' && url.startsWith('http:')) {
+      out.textContent = '✗ Сайт на HTTPS не может обращаться к http-серверу. Нужен адрес https://…';
+      return;
+    }
     out.textContent = 'Проверяю…';
     try {
       const r = await fetch(url + '/api/health');
@@ -321,7 +375,7 @@
   els.form.addEventListener('submit', e => { e.preventDefault(); send(); });
   els.input.addEventListener('input', autosize);
   els.input.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && window.matchMedia('(hover: hover)').matches) { e.preventDefault(); send(); }
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && settings.enterSend) { e.preventDefault(); send(); }
   });
   $('#fileInput').addEventListener('change', e => { addFiles([...e.target.files]); e.target.value = ''; });
   els.chips.addEventListener('click', e => { const b = e.target.closest('button[data-i]'); if (b) { attachments.splice(+b.dataset.i, 1); renderChips(); } });
@@ -331,7 +385,9 @@
   window.addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer?.files?.length) addFiles([...e.dataTransfer.files]); });
 
   $('#newChat').onclick = newChat;
-  $('#menuBtn').onclick = openMenu;
+  $('#menuBtn').onclick = toggleSide;
+  $('#closeSide').onclick = hideSide;
+  $('#topSettings').onclick = openSettings;
   $('#backdrop').onclick = closeMenu;
   $('#themeBtn').onclick = cycleTheme;
   $('#exportBtn').onclick = exportChat;
@@ -367,26 +423,20 @@
   $('#testBackend').onclick = testBackend;
   $('#clearAll').onclick = () => {
     if (!confirm('Удалить ВСЕ чаты? Это нельзя отменить.')) return;
-    abortCtl?.abort(); chats = []; activeId = null; saveChats(); renderChatList(); renderMessages(); els.dlg.close();
+    abortCtl?.abort(); chats = []; activeId = null; saveChats(); renderChatList(); renderMessages();
+    closeSettings(); toast('Все чаты удалены');
   };
-  $('#settingsForm').addEventListener('submit', e => {
-    if (e.submitter?.value !== 'ok') return;
-    settings = {
-      backend: $('#sBackend').value.trim(),
-      model: $('#sModel').value.trim() || 'default',
-      temperature: parseFloat($('#sTemp').value),
-      system: $('#sSystem').value,
-      theme: $('#sTheme').value,
-    };
-    store.set('gdai.settings', settings); applyTheme(); renderBadge();
-  });
+  $('#saveSettings').onclick = saveSettings;
+  $('#cancelSettings').onclick = closeSettings;
+  els.modal.addEventListener('click', e => { if (e.target === els.modal) closeSettings(); });
 
   document.addEventListener('keydown', e => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); newChat(); }
-    if (e.key === 'Escape') closeMenu();
+    if (e.key === 'Escape') { closeMenu(); closeSettings(); }
   });
 
   /* ---------- Init ---------- */
   if (!chats.find(c => c.id === activeId)) activeId = chats[0]?.id || null;
-  applyTheme(); renderBadge(); renderChatList(); renderMessages(); renderChips();
+  els.app.classList.toggle('side-collapsed', !!store.get('gdai.sideCollapsed', false));
+  applyTheme(); applyFont(); renderBadge(); renderChatList(); renderMessages(); renderChips();
 })();
