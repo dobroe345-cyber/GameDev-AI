@@ -8,12 +8,14 @@
   };
 
   const DEFAULTS = {
-    backend: '', model: 'default', temperature: 0.7, system: '', theme: 'auto',
+    provider: '', apiKey: '', baseUrl: '', backend: '', model: '', temperature: 0.7, system: '', theme: 'auto',
     fontSize: 'normal', enterSend: window.matchMedia('(hover: hover)').matches,
   };
   const MAX_FILE = 200 * 1024; // 200 KB per attached text file
 
   let settings = { ...DEFAULTS, ...store.get('gdai.settings', {}) };
+  if (!settings.provider) settings.provider = settings.backend ? 'backend' : 'demo';
+  if (settings.model === 'default') settings.model = '';
   let chats = store.get('gdai.chats', []);
   let activeId = store.get('gdai.active', null);
   let attachments = [];
@@ -146,10 +148,12 @@
   }
 
   function renderBadge() {
-    const online = !!backendUrl();
-    els.badge.textContent = online ? 'сервер' : 'демо';
+    const p = settings.provider;
+    const names = { anthropic: 'Claude', openai: 'ИИ', backend: 'сервер', demo: 'демо' };
+    const online = p !== 'demo';
+    els.badge.textContent = names[p] || 'демо';
     els.badge.classList.toggle('online', online);
-    els.badge.title = online ? backendUrl() : 'Бэкенд не задан — работает демо-режим';
+    els.badge.title = online ? 'Подключён: ' + (settings.model || 'модель по умолчанию') : 'Демо-режим: настоящего ИИ нет. Выбери провайдера в Настройках';
   }
 
   function setBusy(b) {
@@ -223,8 +227,14 @@
     setBusy(true);
     try {
       const history = chat.messages.slice(0, -1).map(({ role, content }) => ({ role, content }));
-      if (backendUrl()) await streamBackend(chat, history, msg, update, abortCtl.signal);
-      else await streamDemo(history, msg, update, abortCtl.signal);
+      if (settings.provider === 'backend') {
+        if (!backendUrl()) throw new Error('Не указан адрес сервера. Открой Настройки.');
+        await streamBackend(chat, history, msg, update, abortCtl.signal);
+      } else if (settings.provider === 'anthropic' || settings.provider === 'openai') {
+        await streamProvider(history, msg, update, abortCtl.signal);
+      } else {
+        await streamDemo(history, msg, update, abortCtl.signal);
+      }
     } catch (e) {
       if (e.name !== 'AbortError') msg.error = 'Ошибка: ' + (e.message || e);
     } finally {
@@ -250,11 +260,26 @@
     }
   }
 
+  // Настоящий ИИ: запрос из браузера к Anthropic или OpenAI-совместимому API
+  async function streamProvider(history, msg, update, signal) {
+    const cfg = {
+      provider: settings.provider,
+      apiKey: settings.apiKey.trim(),
+      baseUrl: settings.baseUrl.trim(),
+      model: settings.model.trim(),
+      temperature: settings.temperature,
+      system: settings.system.trim() || GDAI.DEFAULT_SYSTEM,
+      messages: history,
+      signal,
+    };
+    for await (const chunk of GDAI.stream(cfg)) { msg.content += chunk; update(); }
+  }
+
   // Демо-режим: работает без сервера (например, на GitHub Pages)
   async function streamDemo(history, msg, update, signal) {
     const last = history[history.length - 1]?.content || '';
     const preview = last.length > 200 ? last.slice(0, 200) + '…' : last;
-    const text = `Сейчас включён **демо-режим**: бэкенд не подключён, поэтому настоящего ИИ-ответа нет.\n\nТвоё сообщение получено:\n\n> ${preview.replace(/\n/g, ' ')}\n\nЧтобы подключить ИИ, запусти сервер (\`uvicorn main:app\` в папке \`backend\`) и укажи его адрес в **Настройках**.\n\n\`\`\`js\n// пример: игровой цикл\nfunction loop(t) {\n  update(t);\n  render();\n  requestAnimationFrame(loop);\n}\nrequestAnimationFrame(loop);\n\`\`\``;
+    const text = `Сейчас включён **демо-режим**: бэкенд не подключён, поэтому настоящего ИИ-ответа нет.\n\nТвоё сообщение получено:\n\n> ${preview.replace(/\n/g, ' ')}\n\nЧтобы получить настоящие ответы, открой **Настройки** (⚙), выбери провайдера (Claude, OpenAI-совместимый или свой сервер) и вставь API-ключ.\n\n\`\`\`js\n// пример: игровой цикл\nfunction loop(t) {\n  update(t);\n  render();\n  requestAnimationFrame(loop);\n}\nrequestAnimationFrame(loop);\n\`\`\``;
     const full = text + settingsInfo();
     for (const tok of full.match(/\s*\S+/g) || []) {
       if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
@@ -308,7 +333,7 @@
 
   // Показывает в демо-режиме, какие настройки сейчас применяются
   function settingsInfo() {
-    return `\n\n---\n**Текущие настройки:** модель — \`${settings.model}\`, температура — \`${settings.temperature}\`, системная инструкция — ${settings.system.trim() ? 'задана' : 'не задана'}.`;
+    return `\n\n---\n**Текущие настройки:** модель — \`${settings.model || 'по умолчанию'}\`, температура — \`${settings.temperature}\`, системная инструкция — ${settings.system.trim() ? 'задана' : 'не задана'}.`;
   }
 
   function applyTheme() {
@@ -324,7 +349,19 @@
     toast('Тема: ' + { auto: 'как в системе', dark: 'тёмная', light: 'светлая' }[settings.theme]);
   }
 
+  function syncProviderFields() {
+    const p = $('#sProvider').value;
+    document.querySelectorAll('[data-for]').forEach(el => {
+      el.classList.toggle('hidden', !el.dataset.for.split(' ').includes(p));
+    });
+    $('#sModel').placeholder = p === 'anthropic' ? 'claude-haiku-5-5' : p === 'openai' ? 'например: gpt-4o-mini' : 'по умолчанию';
+  }
+
   function openSettings() {
+    $('#sProvider').value = settings.provider;
+    $('#sKey').value = settings.apiKey;
+    $('#sBase').value = settings.baseUrl;
+    syncProviderFields();
     $('#sBackend').value = settings.backend;
     $('#sModel').value = settings.model;
     $('#sTemp').value = settings.temperature;
@@ -343,7 +380,10 @@
     const temp = parseFloat($('#sTemp').value);
     settings = {
       backend: $('#sBackend').value.trim(),
-      model: $('#sModel').value.trim() || 'default',
+      provider: $('#sProvider').value,
+      apiKey: $('#sKey').value.trim(),
+      baseUrl: $('#sBase').value.trim(),
+      model: $('#sModel').value.trim(),
       temperature: Number.isFinite(temp) ? temp : 0.7,
       system: $('#sSystem').value,
       theme: $('#sTheme').value,
@@ -356,7 +396,28 @@
     toast('Настройки сохранены');
   }
 
-  async function testBackend() {
+  async function testConnection() {
+    const out = $('#testResult'), provider = $('#sProvider').value;
+    if (provider === 'demo') { out.textContent = 'Демо-режим: подключение не нужно'; return; }
+    if (provider === 'backend') return testBackendServer();
+    out.textContent = 'Проверяю…';
+    const ctl = new AbortController();
+    const cfg = {
+      provider, apiKey: $('#sKey').value.trim(), baseUrl: $('#sBase').value.trim(),
+      model: $('#sModel').value.trim(), temperature: 0.7, system: '',
+      messages: [{ role: 'user', content: 'Ответь одним словом: ок' }], signal: ctl.signal,
+    };
+    try {
+      let got = false;
+      for await (const chunk of GDAI.stream(cfg)) {
+        if (chunk) { out.textContent = '✓ Работает. Ответ: ' + chunk.trim().slice(0, 30); got = true; break; }
+      }
+      ctl.abort();
+      if (!got) out.textContent = '✗ Сервис вернул пустой ответ';
+    } catch (e) { out.textContent = '✗ ' + (e.message || e); }
+  }
+
+  async function testBackendServer() {
     const out = $('#testResult'), url = $('#sBackend').value.trim().replace(/\/+$/, '');
     if (!url) { out.textContent = 'Адрес не указан — будет демо-режим'; return; }
     if (location.protocol === 'https:' && url.startsWith('http:')) {
@@ -420,7 +481,8 @@
   els.toBottom.onclick = () => scrollBottom(true);
 
   $('#sTemp').addEventListener('input', e => { $('#sTempVal').textContent = e.target.value; });
-  $('#testBackend').onclick = testBackend;
+  $('#testBackend').onclick = testConnection;
+  $('#sProvider').addEventListener('change', syncProviderFields);
   $('#clearAll').onclick = () => {
     if (!confirm('Удалить ВСЕ чаты? Это нельзя отменить.')) return;
     abortCtl?.abort(); chats = []; activeId = null; saveChats(); renderChatList(); renderMessages();
