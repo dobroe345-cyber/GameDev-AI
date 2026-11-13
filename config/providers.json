@@ -1,0 +1,36 @@
+{
+  "default_chain": ["gpu", "openrouter", "anthropic", "stub"],
+  "providers": {
+    "gpu": {
+      "label": "GPU-узел (vLLM / Ollama / llama.cpp)",
+      "type": "openai_compatible",
+      "base_url_env": "GPU_BASE_URL",
+      "api_key_env": "GPU_API_KEY",
+      "model_env": "GPU_MODEL",
+      "connect_timeout": 5,
+      "read_timeout": 180
+    },
+    "openrouter": {
+      "label": "OpenRouter (резерв)",
+      "type": "openai_compatible",
+      "base_url": "https://openrouter.ai/api/v1",
+      "api_key_env": "OPENROUTER_API_KEY",
+      "model_env": "OPENROUTER_MODEL",
+      "connect_timeout": 8,
+      "read_timeout": 90
+    },
+    "anthropic": {
+      "label": "Anthropic Claude (резерв)",
+      "type": "anthropic",
+      "api_key_env": "ANTHROPIC_API_KEY",
+      "model_env": "ANTHROPIC_MODEL",
+      "model": "claude-haiku-5-5",
+      "connect_timeout": 8,
+      "read_timeout": 90
+    },
+    "stub": {
+      "label": "Заглушка (без модели)",
+      "type": "stub"
+    }
+  }
+}
