@@ -254,13 +254,20 @@
   async function streamBackend(chat, history, msg, update, signal) {
     // Бесплатный Render засыпает: если ответа нет дольше 4 с, говорим об этом
     const wake = setTimeout(() => toast('Сервер просыпается, это займёт до минуты…'), 4000);
+    const post = () => fetch(backendUrl() + '/api/chat', {
+      method: 'POST', signal,
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ chat_id: chat.id, messages: history, model: settings.model, temperature: settings.temperature, system: settings.system || null }),
+    });
     let res;
     try {
-      res = await fetch(backendUrl() + '/api/chat', {
-        method: 'POST', signal,
-        headers: authHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ chat_id: chat.id, messages: history, model: settings.model, temperature: settings.temperature, system: settings.system || null }),
-      });
+      try { res = await post(); }
+      catch (e) {
+        if (e.name === 'AbortError') throw e;
+        // Скорее всего сервер спал: ждём, пока он проснётся, и повторяем один раз
+        if (!(await wakeServer(signal))) throw new Error('Сервер не проснулся за 90 секунд или адрес неверный. Проверь адрес в Настройках и попробуй ещё раз.');
+        res = await post();
+      }
     } catch (e) {
       if (e.name === 'AbortError') throw e;
       throw new Error('Не удалось подключиться к серверу (адрес, интернет или CORS). Сообщение сохранено только на этом устройстве.');
@@ -277,6 +284,29 @@
       msg.content += dec.decode(value, { stream: true });
       update();
     }
+  }
+
+  // Ждёт, пока бесплатный сервер проснётся (опрашивает /api/health до 90 секунд)
+  async function wakeServer(signal) {
+    const end = Date.now() + 90000;
+    while (Date.now() < end) {
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+      try {
+        const r = await fetch(backendUrl() + '/api/health', { signal });
+        if (r.ok) return true;
+      } catch (e) { if (e.name === 'AbortError') throw e; }
+      await new Promise(r => setTimeout(r, 3000));
+    }
+    return false;
+  }
+
+  async function wakeServerAt(url) {
+    const end = Date.now() + 90000;
+    while (Date.now() < end) {
+      try { if ((await fetch(url + '/api/health')).ok) return true; } catch { /* ещё спит */ }
+      await new Promise(r => setTimeout(r, 3000));
+    }
+    return false;
   }
 
   // Подтягивает переписки с сервера (после перезапуска Render, на другом устройстве, после очистки браузера)
@@ -489,7 +519,7 @@
     }
     out.textContent = 'Проверяю (сервер может просыпаться до минуты)…';
     try {
-      const r = await fetch(url + '/api/health');
+      const r = await fetch(url + '/api/health').catch(async () => { out.textContent = 'Сервер просыпается, жду…'; return (await wakeServerAt(url)) ? fetch(url + '/api/health') : Promise.reject(); });
       if (!r.ok) { out.textContent = 'Ошибка HTTP ' + r.status; return; }
       const token = $('#sToken').value.trim();
       if (!token) { out.textContent = '✓ Сервер отвечает. Укажи токен доступа, чтобы проверить остальное'; return; }
