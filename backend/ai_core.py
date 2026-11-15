@@ -365,9 +365,9 @@ class ModelRouter:
         live = [p for p in order if not self._is_down(p)]
         for p in live or order:  # недавно упавших пропускаем; если других нет, всё же пробуем
             spec = self.specs[p]
-            if spec.type == "stub" and errors:  # заглушка объясняет, что именно не ответило
+            if spec.type == "stub" and (errors or self._unconfigured()):  # заглушка объясняет, что именно не так
                 self._mark_up(p)
-                return StreamHandle(p, "", _stub_notice(errors), list(errors))
+                return StreamHandle(p, "", _stub_notice(errors, self._unconfigured()), list(errors))
             use_model = self._model_for(spec, model)
             try:
                 gen = _TYPES[spec.type](spec, msgs, use_model, temperature, max_tokens, sys_text)
@@ -383,6 +383,9 @@ class ModelRouter:
             errors.setdefault(p, self._last_error.get(p, "недоступен"))
         raise ProvidersUnavailable(errors)
 
+    def _unconfigured(self) -> dict[str, str]:
+        return {p: self.specs[p].reason for p in self.chain if p in self.specs and self.specs[p].reason}
+
     def stream(self, messages: list[Message], **kw) -> Iterator[str]:
         return self.open_stream(messages, **kw).chunks
 
@@ -396,9 +399,15 @@ def _chain_first(first: str, rest: Iterator[str]) -> Iterator[str]:
     yield from rest
 
 
-def _stub_notice(errors: dict[str, str]) -> Iterator[str]:
-    names = ", ".join(errors) or "модели"
-    text = (f"Сейчас ни одна ИИ-модель не отвечает (проверены: {names}). "
-            "Твоё сообщение сохранено, повтори запрос позже или запусти GPU-узел.")
-    for word in text.split(" "):
-        yield word + " "
+def _stub_notice(errors: dict[str, str], unconfigured: dict[str, str] | None = None) -> Iterator[str]:
+    parts = ["Сейчас ни одна ИИ-модель не отвечает."]
+    for p, e in errors.items():
+        parts.append(f"• {p}: {e}")
+    for p, why in (unconfigured or {}).items():
+        parts.append(f"• {p}: не настроен ({why})")
+    parts.append("Твоё сообщение сохранено. Проверь переменные в Render → Environment или повтори позже.")
+    text = "\n".join(parts)
+    for line in text.split("\n"):
+        for word in line.split(" "):
+            yield word + " "
+        yield "\n"

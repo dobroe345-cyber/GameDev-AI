@@ -306,3 +306,17 @@ def test_empty_conversation_is_rejected():
     r = ModelRouter({"s": STUB}, ["s"])
     with pytest.raises(ProviderError):
         r.open_stream([{"role": "assistant", "content": "x"}])
+
+
+def test_stub_names_missing_settings_when_nothing_is_configured():
+    cfg = {"default_chain": ["gpu", "stub"], "providers": {
+        "gpu": {"type": "openai_compatible", "base_url_env": "GPU_BASE_URL", "model_env": "GPU_MODEL", "api_key_env": "GPU_API_KEY"},
+        "stub": {"type": "stub"}}}
+    import tempfile, pathlib
+    f = pathlib.Path(tempfile.mkdtemp()) / "p.json"; f.write_text(json.dumps(cfg))
+    from ai_core import load_specs
+    specs, chain = load_specs(f, env={})
+    r = ModelRouter(specs, chain)
+    h = r.open_stream(Q)
+    msg = text(h)
+    assert h.provider == "stub" and "GPU_BASE_URL" in msg and "Render" in msg
