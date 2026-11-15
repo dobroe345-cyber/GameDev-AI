@@ -26,4 +26,5 @@ def main():
     sys.exit(1 if st["warnings"] else 0)
 
 
-main()
+if __name__ == "__main__":
+    main()
