@@ -8,7 +8,7 @@
   };
 
   const DEFAULTS = {
-    provider: '', apiKey: '', baseUrl: '', backend: '', model: '', temperature: 0.7, system: '', theme: 'auto',
+    provider: '', apiKey: '', baseUrl: '', backend: '', token: '', model: '', temperature: 0.7, system: '', theme: 'auto',
     fontSize: 'normal', enterSend: window.matchMedia('(hover: hover)').matches,
   };
   const MAX_FILE = 200 * 1024; // 200 KB per attached text file
@@ -32,6 +32,12 @@
   const saveChats = () => { store.set('gdai.chats', chats); store.set('gdai.active', activeId); };
   const active = () => chats.find(c => c.id === activeId) || null;
   const backendUrl = () => settings.backend.trim().replace(/\/+$/, '');
+  const authHeaders = (extra = {}) => settings.token ? { ...extra, Authorization: 'Bearer ' + settings.token.trim() } : extra;
+  // Тихие запросы к серверу (переименование, удаление): ошибки не мешают работе интерфейса
+  const bg = (method, path, body) => {
+    if (settings.provider !== 'backend' || !backendUrl()) return;
+    fetch(backendUrl() + path, { method, headers: authHeaders(body ? { 'Content-Type': 'application/json' } : {}), body: body ? JSON.stringify(body) : undefined }).catch(() => {});
+  };
 
   /* ---------- Markdown (small, safe) ---------- */
   const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -180,6 +186,7 @@
     if (!confirm('Удалить чат?')) return;
     if (busy && id === activeId) abortCtl?.abort();
     chats = chats.filter(c => c.id !== id);
+    bg('DELETE', '/api/chats/' + encodeURIComponent(id));
     if (activeId === id) activeId = chats[0]?.id || null;
     saveChats(); renderChatList(); renderMessages();
   }
@@ -187,7 +194,7 @@
   function renameChat(id) {
     const c = chats.find(x => x.id === id); if (!c) return;
     const t = prompt('Название чата', c.title);
-    if (t && t.trim()) { c.title = t.trim().slice(0, 80); saveChats(); renderChatList(); if (id === activeId) els.title.textContent = c.title; }
+    if (t && t.trim()) { c.title = t.trim().slice(0, 80); bg('PATCH', '/api/chats/' + encodeURIComponent(id), { title: c.title }); saveChats(); renderChatList(); if (id === activeId) els.title.textContent = c.title; }
   }
 
   function exportChat() {
@@ -245,12 +252,24 @@
   }
 
   async function streamBackend(chat, history, msg, update, signal) {
-    const res = await fetch(backendUrl() + '/api/chat', {
-      method: 'POST', signal,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chat.id, messages: history, model: settings.model, temperature: settings.temperature, system: settings.system || null }),
-    });
+    // Бесплатный Render засыпает: если ответа нет дольше 4 с, говорим об этом
+    const wake = setTimeout(() => toast('Сервер просыпается, это займёт до минуты…'), 4000);
+    let res;
+    try {
+      res = await fetch(backendUrl() + '/api/chat', {
+        method: 'POST', signal,
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ chat_id: chat.id, messages: history, model: settings.model, temperature: settings.temperature, system: settings.system || null }),
+      });
+    } catch (e) {
+      if (e.name === 'AbortError') throw e;
+      throw new Error('Не удалось подключиться к серверу (адрес, интернет или CORS). Сообщение сохранено только на этом устройстве.');
+    } finally { clearTimeout(wake); }
+    if (res.status === 401) throw new Error('Сервер не принял токен. Проверь «Токен доступа» в Настройках.');
+    if (res.status === 503) throw new Error('Сейчас нет доступных моделей (GPU выключен, резервные не настроены). Вопрос сохранён на сервере, повтори позже.');
     if (!res.ok) throw new Error('Сервер ответил HTTP ' + res.status);
+    const used = res.headers.get('X-Provider'), from = res.headers.get('X-Fallback');
+    if (from && used) toast(`Основная модель недоступна, отвечает «${used}»`);
     const reader = res.body.getReader(), dec = new TextDecoder();
     for (;;) {
       const { done, value } = await reader.read();
@@ -258,6 +277,47 @@
       msg.content += dec.decode(value, { stream: true });
       update();
     }
+  }
+
+  // Подтягивает переписки с сервера (после перезапуска Render, на другом устройстве, после очистки браузера)
+  async function syncFromServer() {
+    if (settings.provider !== 'backend' || !backendUrl() || !settings.token) return;
+    try {
+      const r = await fetch(backendUrl() + '/api/chats', { headers: authHeaders() });
+      if (!r.ok) return;
+      const remote = await r.json();
+      let changed = false;
+      for (const rc of remote) {
+        const id = rc.id || rc.chat_id;
+        const local = chats.find(c => c.id === id);
+        if (local && local.messages.length && !busy) {
+          const rr = await fetch(backendUrl() + '/api/chats/' + encodeURIComponent(id), { headers: authHeaders() });
+          if (!rr.ok) continue;
+          const full = await rr.json();
+          if ((full.messages || []).length <= local.messages.length) continue;
+          local.messages = serverMessages(full.messages); changed = true;
+        } else if (!local) {
+          const rr = await fetch(backendUrl() + '/api/chats/' + encodeURIComponent(id), { headers: authHeaders() });
+          if (!rr.ok) continue;
+          const full = await rr.json();
+          chats.push({ id, title: full.title || rc.title || 'Чат', messages: serverMessages(full.messages), created: (rc.created_at || 0) * 1000 || Date.now() });
+          changed = true;
+        }
+      }
+      if (changed) {
+        chats.sort((a, b) => (b.created || 0) - (a.created || 0));
+        if (!chats.find(c => c.id === activeId)) activeId = chats[0]?.id || null;
+        saveChats(); renderChatList(); renderMessages();
+      }
+    } catch { /* сервер спит или недоступен: работаем с локальной копией */ }
+  }
+
+  function serverMessages(list) {
+    return (list || []).map(m => {
+      const o = { role: m.role, content: m.content || '', ts: (m.ts || 0) * 1000 || Date.now() };
+      if (m.status === 'interrupted') o.content += (o.content ? '\n\n' : '') + '_(ответ оборвался, нажми «повторить»)_';
+      return o;
+    });
   }
 
   // Настоящий ИИ: запрос из браузера к Anthropic или OpenAI-совместимому API
@@ -363,6 +423,7 @@
     $('#sBase').value = settings.baseUrl;
     syncProviderFields();
     $('#sBackend').value = settings.backend;
+    $('#sToken').value = settings.token || '';
     $('#sModel').value = settings.model;
     $('#sTemp').value = settings.temperature;
     $('#sTempVal').textContent = settings.temperature;
@@ -380,6 +441,7 @@
     const temp = parseFloat($('#sTemp').value);
     settings = {
       backend: $('#sBackend').value.trim(),
+      token: $('#sToken').value.trim(),
       provider: $('#sProvider').value,
       apiKey: $('#sKey').value.trim(),
       baseUrl: $('#sBase').value.trim(),
@@ -394,6 +456,7 @@
     applyTheme(); applyFont(); renderBadge();
     closeSettings();
     toast('Настройки сохранены');
+    syncFromServer();
   }
 
   async function testConnection() {
@@ -424,11 +487,19 @@
       out.textContent = '✗ Сайт на HTTPS не может обращаться к http-серверу. Нужен адрес https://…';
       return;
     }
-    out.textContent = 'Проверяю…';
+    out.textContent = 'Проверяю (сервер может просыпаться до минуты)…';
     try {
       const r = await fetch(url + '/api/health');
-      const j = await r.json();
-      out.textContent = r.ok ? '✓ Связь есть' + (j.provider ? ` (провайдер: ${j.provider})` : '') : 'Ошибка HTTP ' + r.status;
+      if (!r.ok) { out.textContent = 'Ошибка HTTP ' + r.status; return; }
+      const token = $('#sToken').value.trim();
+      if (!token) { out.textContent = '✓ Сервер отвечает. Укажи токен доступа, чтобы проверить остальное'; return; }
+      const sr = await fetch(url + '/api/status?deep=1', { headers: { Authorization: 'Bearer ' + token } });
+      if (sr.status === 401) { out.textContent = '✗ Сервер работает, но токен неверный'; return; }
+      if (!sr.ok) { out.textContent = '✗ Статус: HTTP ' + sr.status; return; }
+      const st = await sr.json();
+      const alive = Object.entries(st.models_alive || {}).filter(([, v]) => v).map(([k]) => k);
+      out.textContent = '✓ Связь есть. Рабочие модели: ' + (alive.join(', ') || 'нет') +
+        (st.warnings?.length ? '\n⚠ ' + st.warnings.join('\n⚠ ') : '');
     } catch { out.textContent = '✗ Не удалось подключиться (адрес / CORS?)'; }
   }
 
@@ -501,4 +572,5 @@
   if (!chats.find(c => c.id === activeId)) activeId = chats[0]?.id || null;
   els.app.classList.toggle('side-collapsed', !!store.get('gdai.sideCollapsed', false));
   applyTheme(); applyFont(); renderBadge(); renderChatList(); renderMessages(); renderChips();
+  syncFromServer();
 })();

@@ -201,6 +201,14 @@ class TaskStore:
         )
         return list(reversed(rows))
 
+    def next_due(self) -> float | None:
+        """Когда воркеру нужно проснуться: срок ближайшей отложенной задачи или истечения аренды. None, если дел нет."""
+        row = self.db.one(
+            "SELECT MIN(CASE WHEN status = 'queued' THEN run_after ELSE lease_until END) AS t "
+            "FROM tasks WHERE status IN ('queued', 'running')"
+        )
+        return row["t"] if row and row["t"] is not None else None
+
     def counts(self) -> dict[str, int]:
         return {r["status"]: int(r["n"]) for r in self.db.query("SELECT status, COUNT(*) AS n FROM tasks GROUP BY status")}
 
@@ -247,16 +255,16 @@ def register_task(kind: str):
 class TaskWorker:
     def __init__(
         self, store: TaskStore, deps: dict, *, lease_s: float = 60, max_attempts: int = 3,
-        poll_s: float = 2.0, handlers: dict[str, Handler] | None = None,
+        poll_s: float = 600.0, handlers: dict[str, Handler] | None = None,
     ) -> None:
         self.store, self.deps = store, deps
         self.lease_s, self.max_attempts, self.poll_s = lease_s, max_attempts, poll_s
         self.handlers = handlers if handlers is not None else HANDLERS
         self._stop = threading.Event()
+        self._wake = threading.Event()     # «появилась работа»: будит воркер без опроса БД
         self._lost = threading.Event()     # аренда потеряна или задача отменена
         self._current: str | None = None
         self._threads: list[threading.Thread] = []
-        self._last_maintenance = 0.0
 
     # ---------------------------------------------------------------- старт
     def start(self) -> None:
@@ -272,9 +280,14 @@ class TaskWorker:
             log.warning("Восстановление задач: %s", res)
         return res
 
+    def notify(self) -> None:
+        """Вызывать после создания задачи: воркер проснётся сразу."""
+        self._wake.set()
+
     def stop(self, timeout: float = 8.0) -> None:
         """Мягкая остановка: текущая задача возвращается в очередь и продолжится в новом процессе."""
         self._stop.set()
+        self._wake.set()
         for t in self._threads:
             t.join(timeout=timeout)
         tid = self._current
@@ -293,10 +306,17 @@ class TaskWorker:
         while not self._stop.is_set():
             try:
                 if not self.run_once():
-                    self._stop.wait(self.poll_s)
+                    self._sleep()
             except Exception:  # воркер не должен умирать из-за сбоя БД и т.п.
                 log.exception("Сбой цикла воркера")
-                self._stop.wait(self.poll_s * 2)
+                self._stop.wait(min(self.poll_s, 30.0))
+
+    def _sleep(self) -> None:
+        """Спит до ближайшего дела. Бесконечный опрос не даёт «заснуть» бесплатной БД Neon и съедает её часы."""
+        due = self.store.next_due()
+        delay = self.poll_s if due is None else max(0.05, min(due - time.time() + 0.05, self.poll_s))
+        self._wake.wait(delay)
+        self._wake.clear()
 
     def _heartbeat_loop(self) -> None:
         while not self._stop.wait(max(1.0, self.lease_s / 3)):
@@ -312,9 +332,7 @@ class TaskWorker:
                 log.exception("Не удалось продлить аренду")
 
     def maintenance(self) -> None:
-        if time.time() - self._last_maintenance > self.lease_s / 2:
-            self._last_maintenance = time.time()
-            self.store.requeue_expired(self.max_attempts)
+        self.store.requeue_expired(self.max_attempts)
 
     def run_once(self) -> bool:
         """Берёт и выполняет одну задачу. True, если задача была."""

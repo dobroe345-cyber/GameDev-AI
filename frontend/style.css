@@ -258,3 +258,4 @@ button { cursor: pointer; }
   .messages { scroll-behavior: auto; }
   .sidebar { transition: none; }
 }
+.muted { white-space: pre-line; }

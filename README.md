@@ -82,3 +82,12 @@ g++ -std=c++17 -O2 -shared -fPIC -o libengine.so engine.cpp     # Linux
 ```bash
 pytest tests
 ```
+
+## Серверная часть (Render + Neon + R2 + GPU)
+
+- Архитектура и что где хранится: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- Пошаговое развёртывание на бесплатных тарифах: [docs/DEPLOY.md](docs/DEPLOY.md)
+- Проверка после деплоя: `python scripts/smoke_test.py https://ВАШ.onrender.com ТОКЕН`
+- Тесты: `pip install -r requirements-dev.txt && pytest`
+
+Состояние (переписки, настройки, задачи, файлы) хранится только в Neon и R2, поэтому перезапуск Render или выключенный GPU ничего не теряют.

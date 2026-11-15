@@ -91,6 +91,9 @@ class Memory:
         params.append(message_id)
         self.db.execute(f"UPDATE messages SET {', '.join(sets)} WHERE id = ?", params)
 
+    def delete_message(self, message_id: int) -> bool:
+        return self.db.execute("DELETE FROM messages WHERE id = ?", (message_id,)) > 0
+
     def get_history(self, chat_id: str, limit: int = 200) -> list[dict[str, Any]]:
         limit = max(1, min(limit, _MAX_HISTORY))
         rows = self.db.query(
@@ -134,10 +137,13 @@ class Memory:
 
     def mark_interrupted(self, older_than_s: float = 60.0) -> int:
         """Ответы, которые «идут» слишком давно, значит процесс умер на середине: помечаем прерванными."""
-        return self.db.execute(
-            "UPDATE messages SET status = 'interrupted', updated_at = ? WHERE status = 'streaming' AND updated_at < ?",
-            (time.time(), time.time() - older_than_s),
-        )
+        cutoff = time.time() - older_than_s
+        with self.db.tx() as tx:
+            tx.execute("DELETE FROM messages WHERE status = 'streaming' AND content = '' AND updated_at < ?", (cutoff,))
+            return tx.execute(
+                "UPDATE messages SET status = 'interrupted', updated_at = ? WHERE status = 'streaming' AND updated_at < ?",
+                (time.time(), cutoff),
+            )
 
     def clear(self, chat_id: str) -> int:
         return self.db.execute("DELETE FROM messages WHERE chat_id = ?", (chat_id,))

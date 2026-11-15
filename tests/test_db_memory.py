@@ -269,3 +269,11 @@ def test_pg_rolls_back_on_error():
             t.execute("INSERT INTO chats (id, title, created_at, updated_at) VALUES (%s,'',1,1)".replace("%s", "?"), ("z",))
             raise ValueError
     assert ("rollback",) in state["log"]
+
+
+def test_mark_interrupted_drops_empty_streaming_placeholders(tmp_path):
+    m = Memory(tmp_path / "t.db")
+    empty = m.add_message("c", "assistant", "", status="streaming")
+    m.db.execute("UPDATE messages SET updated_at = updated_at - 500 WHERE id = ?", (empty,))
+    m.mark_interrupted(60)
+    assert m.get_history("c") == []                  # пустой «идущий» ответ не превращается в пустое сообщение

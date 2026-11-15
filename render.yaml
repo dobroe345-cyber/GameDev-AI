@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: gamedev-ai
+    runtime: python
+    plan: free
+    region: frankfurt
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --app-dir backend --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: API_TOKEN
+        generateValue: true
+      - key: CORS_ORIGINS
+        value: https://dobroe345-cyber.github.io
+      - key: DATABASE_URL
+        sync: false
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET
+        sync: false
+      - key: GPU_BASE_URL
+        sync: false
+      - key: GPU_API_KEY
+        sync: false
+      - key: GPU_MODEL
+        sync: false

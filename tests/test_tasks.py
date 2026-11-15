@@ -358,3 +358,38 @@ def test_restart_on_startup_recovers_automatically(tmp_path, clock):
         time.sleep(0.05)
     w2.stop()
     assert store2.get(t["id"])["status"] == "done"
+
+
+# ------------------------------------------ экономия часов бесплатной БД Neon
+def test_next_due_covers_deferred_tasks_and_leases(tmp_path, clock):
+    w, store, *_ = boot(tmp_path)
+    assert store.next_due() is None                                   # дел нет: просыпаться незачем
+    a = store.create("k", {})
+    assert store.next_due() == 0                                      # готова сейчас
+    db = store.db
+    db.execute("UPDATE tasks SET run_after = ? WHERE id = ?", (clock.t + 90, a["id"]))
+    assert store.next_due() == pytest.approx(clock.t + 90)            # отложена: проснуться к этому сроку
+    db.execute("UPDATE tasks SET run_after = 0 WHERE id = ?", (a["id"],))
+    store.claim_next(60)
+    assert store.next_due() == pytest.approx(clock.t + 60)            # выполняется: проснуться, когда истечёт аренда
+
+
+def test_idle_worker_does_not_poll_database(tmp_path):
+    w, store, *_ = boot(tmp_path)
+    w.poll_s = 600
+    queries = []
+    orig = store.db.query
+    store.db.query = lambda *a, **k: (queries.append(a[0][:30]), orig(*a, **k))[1]
+    w.start()
+    time.sleep(0.5)
+    n = len(queries)
+    time.sleep(1.0)
+    assert len(queries) == n, "в простое воркер не должен обращаться к БД"
+    # новая задача будит воркера сразу, без ожидания 10 минут
+    t = store.create("agent", {"goal": "g"})
+    w.notify()
+    deadline = time.time() + 5
+    while time.time() < deadline and store.get(t["id"])["status"] != "done":
+        time.sleep(0.05)
+    w.stop()
+    assert store.get(t["id"])["status"] == "done"
