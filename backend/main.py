@@ -28,7 +28,7 @@ from settings import Settings
 from storage import StorageError
 from tasks import HANDLERS
 
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 ID_RE = r"^[A-Za-z0-9_-]{1,64}$"
 KEY_RE = r"^[A-Za-z0-9_.-]{1,64}$"
 SECRET_WORDS = ("key", "token", "secret", "password", "passwd")

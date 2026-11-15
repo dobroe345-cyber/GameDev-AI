@@ -367,3 +367,10 @@ def test_backup_and_restore_after_database_loss(tmp_path):
         assert new.j("POST", "/api/backups/restore", {"key": "../secret"})[0] == 400
     finally:
         new.stop(); gpu.stop()
+
+
+def test_cors_works_by_default_for_github_pages_and_ignores_paths_in_config(tmp_path):
+    base = make_settings(tmp_path, {}, CORS_ORIGINS="")
+    assert "https://dobroe345-cyber.github.io" in base.cors_origins
+    fixed = Settings.from_env({"CORS_ORIGINS": " https://a.github.io/gamedev-ai/ , https://B.example "})
+    assert fixed.cors_origins == ("https://a.github.io", "https://b.example")

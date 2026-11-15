@@ -1,6 +1,7 @@
 (() => {
   'use strict';
 
+  const VERSION = '2026-11-15.3';
   const $ = (s, r = document) => r.querySelector(s);
   const store = {
     get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
@@ -265,7 +266,7 @@
       catch (e) {
         if (e.name === 'AbortError') throw e;
         // Скорее всего сервер спал: ждём, пока он проснётся, и повторяем один раз
-        if (!(await wakeServer(signal))) throw new Error('Сервер не проснулся за 90 секунд или адрес неверный. Проверь адрес в Настройках и попробуй ещё раз.');
+        if (!(await wakeServer(signal))) throw new Error('Сервер не ответил за 90 секунд. Если ссылка сервера открывается в Safari, то в Render → Environment проверь CORS_ORIGINS (должно быть https://dobroe345-cyber.github.io). Иначе проверь адрес в Настройках.');
         res = await post();
       }
     } catch (e) {
@@ -462,6 +463,7 @@
     $('#sFont').value = settings.fontSize;
     $('#sEnter').checked = !!settings.enterSend;
     $('#testResult').textContent = '';
+    $('#appVersion').textContent = 'Версия интерфейса: ' + VERSION;
     els.modal.classList.remove('hidden');
   }
 
@@ -521,14 +523,16 @@
     try {
       const r = await fetch(url + '/api/health').catch(async () => { out.textContent = 'Сервер просыпается, жду…'; return (await wakeServerAt(url)) ? fetch(url + '/api/health') : Promise.reject(); });
       if (!r.ok) { out.textContent = 'Ошибка HTTP ' + r.status; return; }
+      const hj = await r.json().catch(() => ({}));
+      const ver = `(сервер v${hj.version || '?'}, интерфейс v${VERSION})`;
       const token = $('#sToken').value.trim();
-      if (!token) { out.textContent = '✓ Сервер отвечает. Укажи токен доступа, чтобы проверить остальное'; return; }
+      if (!token) { out.textContent = '✓ Сервер отвечает ' + ver + '. Укажи токен доступа, чтобы проверить остальное'; return; }
       const sr = await fetch(url + '/api/status?deep=1', { headers: { Authorization: 'Bearer ' + token } });
       if (sr.status === 401) { out.textContent = '✗ Сервер работает, но токен неверный'; return; }
       if (!sr.ok) { out.textContent = '✗ Статус: HTTP ' + sr.status; return; }
       const st = await sr.json();
       const alive = Object.entries(st.models_alive || {}).filter(([, v]) => v).map(([k]) => k);
-      out.textContent = '✓ Связь есть. Рабочие модели: ' + (alive.join(', ') || 'нет') +
+      out.textContent = '✓ Связь есть ' + ver + '. Рабочие модели: ' + (alive.join(', ') || 'нет') +
         (st.warnings?.length ? '\n⚠ ' + st.warnings.join('\n⚠ ') : '');
     } catch { out.textContent = '✗ Не удалось подключиться (адрес / CORS?)'; }
   }

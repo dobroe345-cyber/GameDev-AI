@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
@@ -18,6 +19,9 @@ def _int(env: Mapping[str, str], name: str, default: int) -> int:
 
 def _flag(env: Mapping[str, str], name: str) -> bool:
     return env.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+DEFAULT_ORIGIN = "https://dobroe345-cyber.github.io"  # интерфейс на GitHub Pages: работает без настройки CORS_ORIGINS
 
 
 @dataclass(frozen=True)
@@ -52,9 +56,14 @@ class Settings:
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
         env = os.environ if env is None else env
         data_dir = Path(env.get("DATA_DIR", "").strip() or ROOT / "data")
-        origins = [o.strip().rstrip("/") for o in env.get("CORS_ORIGINS", "").split(",") if o.strip()]
+        # CORS: допускаем только схему://хост (путь и «/» на конце отбрасываем, это частая ошибка при вводе)
+        origins = []
+        for o in env.get("CORS_ORIGINS", "").split(","):
+            m = re.match(r"^\s*(https?://[^/\s]+)", o)
+            if m and m.group(1).lower() not in origins:
+                origins.append(m.group(1).lower())
         if not origins:
-            origins = ["http://localhost:5500", "http://127.0.0.1:5500"]
+            origins = [DEFAULT_ORIGIN, "http://localhost:5500", "http://127.0.0.1:5500"]
         account = env.get("R2_ACCOUNT_ID", "").strip()
         return cls(
             database_url=env.get("DATABASE_URL", "").strip() or f"sqlite:///{data_dir / 'gdai.db'}",
