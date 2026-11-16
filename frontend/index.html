@@ -4,129 +4,196 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#212121">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="GameDev AI">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <title>GameDev AI</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="icon" type="image/svg+xml" href="icons/favicon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
+  <!-- Набор иконок: единый стиль (линия 1.75, скруглённые концы). Использование: <svg class="i"><use href="#i-имя"/></svg> -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <defs>
+      <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+      <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M9.5 4.5v15"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+      <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h8M18 7h2M4 17h2M12 17h8"/><circle cx="15" cy="7" r="2.4"/><circle cx="9" cy="17" r="2.4"/></symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M9 7V4.5h6V7M6 7l.9 12a2 2 0 0 0 2 1.8h6.2a2 2 0 0 0 2-1.8L18 7"/></symbol>
+      <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M4 20l1-4L16.5 4.5a2.1 2.1 0 0 1 3 3L8 19l-4 1zM14.5 6.5l3 3"/></symbol>
+      <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7.5 11L12 15.5 16.5 11M5 20h14"/></symbol>
+      <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></symbol>
+      <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.2A8 8 0 0 1 9.8 4 8 8 0 1 0 20 14.2z"/></symbol>
+      <symbol id="i-auto" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17a8.5 8.5 0 0 0 0-17z" fill="currentColor"/></symbol>
+      <symbol id="i-clip" viewBox="0 0 24 24"><path d="M20 11.5l-8 8a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4L14 7"/></symbol>
+      <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+      <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6"/></symbol>
+      <symbol id="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2.5" fill="currentColor"/></symbol>
+      <symbol id="i-chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M5 15V7a2.5 2.5 0 0 1 2.5-2.5H15"/></symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.6-3.2L4 9.5M4 4.5v5h5M4 13a8 8 0 0 0 14.6 3.2L20 14.5M20 19.5v-5h-5"/></symbol>
+      <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></symbol>
+      <symbol id="i-dots" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="18.5" cy="12" r="1.4" fill="currentColor"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+      <symbol id="i-server" viewBox="0 0 24 24"><rect x="3.5" y="4" width="17" height="7" rx="2.2"/><rect x="3.5" y="13" width="17" height="7" rx="2.2"/><path d="M7.5 7.5h.01M7.5 16.5h.01"/></symbol>
+      <symbol id="i-chat" viewBox="0 0 24 24"><path d="M5 5.5h14a1.5 1.5 0 0 1 1.5 1.5v8.5A1.5 1.5 0 0 1 19 17H11l-4.5 3.5V17H5a1.5 1.5 0 0 1-1.5-1.5V7A1.5 1.5 0 0 1 5 5.5z"/></symbol>
+      <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3c.6 4.6 1.9 6 6.5 6.5C13.9 10 12.6 11.4 12 16c-.6-4.6-1.9-6-6.5-6.5C10.1 9 11.4 7.6 12 3z"/><path d="M18.5 15c.3 2 .9 2.6 2.8 2.9-1.9.3-2.5.9-2.8 2.9-.3-2-.9-2.6-2.8-2.9 1.9-.3 2.5-.9 2.8-2.9z"/></symbol>
+      <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4.5L2.8 19.5h18.4L12 4.5zM12 10v4.5M12 17.2h.01"/></symbol>
+    </defs>
+  </svg>
+
   <div class="app" id="app">
     <div class="backdrop" id="backdrop"></div>
 
     <aside class="sidebar" id="sidebar" aria-label="Чаты">
       <div class="side-top">
-        <div class="side-head">
-          <button class="btn primary" id="newChat" type="button">＋ Новый чат</button>
-          <button class="icon-btn" id="closeSide" type="button" aria-label="Скрыть панель" title="Скрыть панель">✕</button>
+        <div class="brand">
+          <img class="brand-logo" src="icons/logo.svg" width="32" height="32" alt="">
+          <span class="brand-name">GameDev AI</span>
+          <button class="icon-btn" id="closeSide" type="button" aria-label="Скрыть панель" title="Скрыть панель"><svg class="i"><use href="#i-panel"/></svg></button>
         </div>
-        <input class="search" id="search" type="search" placeholder="Поиск по чатам" aria-label="Поиск по чатам">
+        <button class="btn primary new-chat" id="newChat" type="button"><svg class="i"><use href="#i-plus"/></svg><span>Новый чат</span></button>
+        <div class="search-wrap">
+          <svg class="i"><use href="#i-search"/></svg>
+          <input class="search" id="search" type="search" placeholder="Поиск по чатам" aria-label="Поиск по чатам">
+        </div>
       </div>
       <nav class="chat-list" id="chatList"></nav>
       <div class="side-bottom">
-        <button class="btn ghost wide" id="openSettings" type="button">⚙ Настройки</button>
+        <div class="conn" id="connStatus" title="Состояние сервера"><span class="dot" id="connDot"></span><span id="connText">Демо-режим</span></div>
+        <button class="menu-row" id="openSettings" type="button"><svg class="i"><use href="#i-sliders"/></svg><span>Настройки</span></button>
       </div>
     </aside>
 
     <main class="main">
       <header class="topbar">
-        <button class="icon-btn" id="menuBtn" type="button" aria-label="Панель чатов" title="Панель чатов">☰</button>
+        <button class="icon-btn" id="menuBtn" type="button" aria-label="Панель чатов" title="Панель чатов"><svg class="i"><use href="#i-menu"/></svg></button>
         <div class="title" id="chatTitle">GameDev AI</div>
         <span class="badge" id="modeBadge">демо</span>
-        <button class="icon-btn" id="exportBtn" type="button" aria-label="Экспорт чата" title="Экспорт чата">⤓</button>
-        <button class="icon-btn" id="themeBtn" type="button" aria-label="Сменить тему" title="Тема">◐</button>
-        <button class="icon-btn" id="topSettings" type="button" aria-label="Настройки" title="Настройки">⚙</button>
+        <button class="icon-btn" id="themeBtn" type="button" aria-label="Сменить тему" title="Тема"><svg class="i" id="themeIcon"><use href="#i-auto"/></svg></button>
+        <button class="icon-btn" id="moreBtn" type="button" aria-label="Меню чата" aria-haspopup="menu" title="Меню чата"><svg class="i"><use href="#i-dots"/></svg></button>
       </header>
 
       <section class="messages" id="messages" aria-live="polite"></section>
 
-      <button class="to-bottom hidden" id="toBottom" type="button" aria-label="Вниз">↓</button>
+      <button class="to-bottom hidden" id="toBottom" type="button" aria-label="Вниз"><svg class="i"><use href="#i-down"/></svg></button>
 
       <footer class="composer-wrap">
         <div class="chips" id="chips"></div>
         <form class="composer" id="composer" autocomplete="off">
-          <label class="icon-btn" for="fileInput" title="Прикрепить файл" aria-label="Прикрепить файл">📎</label>
+          <label class="icon-btn" for="fileInput" title="Прикрепить файл" aria-label="Прикрепить файл"><svg class="i"><use href="#i-clip"/></svg></label>
           <input type="file" id="fileInput" multiple hidden>
-          <textarea id="input" rows="1" placeholder="Напиши задачу для GameDev AI…" aria-label="Сообщение"></textarea>
-          <button class="send" id="sendBtn" type="submit" aria-label="Отправить">➤</button>
+          <textarea id="input" rows="1" placeholder="Напиши задачу…" aria-label="Сообщение"></textarea>
+          <button class="send" id="sendBtn" type="submit" aria-label="Отправить"><svg class="i"><use href="#i-up"/></svg></button>
         </form>
         <div class="hint">ИИ может ошибаться, проверяй код.</div>
       </footer>
     </main>
   </div>
 
+  <!-- Всплывающее меню (чат в списке или меню в шапке) -->
+  <div class="popmenu hidden" id="popMenu" role="menu"></div>
+
   <div class="modal hidden" id="settings" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
     <div class="modal-card">
-      <div class="settings-body">
+      <div class="modal-head">
         <h2 id="settingsTitle">Настройки</h2>
+        <button class="icon-btn" id="closeSettings" type="button" aria-label="Закрыть"><svg class="i"><use href="#i-x"/></svg></button>
+      </div>
+      <div class="tabs" id="settingsTabs" role="tablist">
+        <button type="button" role="tab" data-tab="conn" class="on">Подключение</button>
+        <button type="button" role="tab" data-tab="chat">Ответы</button>
+        <button type="button" role="tab" data-tab="look">Вид</button>
+        <button type="button" role="tab" data-tab="data">Данные</button>
+      </div>
 
-        <label>Откуда брать ответы ИИ
-          <select id="sProvider">
-            <option value="demo">Демо (без ИИ)</option>
-            <option value="anthropic">Anthropic (Claude) — нужен API-ключ</option>
-            <option value="openai">OpenAI-совместимый (OpenAI, OpenRouter, Groq…)</option>
-            <option value="backend">Свой сервер (backend)</option>
-          </select>
-        </label>
-        <label data-for="anthropic openai">API-ключ
-          <input id="sKey" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="вставь ключ">
-          <span class="muted">Ключ хранится только в этом браузере и уходит только выбранному сервису.</span>
-        </label>
-        <label data-for="openai">Адрес API
-          <input id="sBase" type="url" autocapitalize="off" placeholder="https://api.openai.com/v1">
-        </label>
-        <label data-for="backend">Адрес своего сервера
-          <input id="sBackend" type="url" autocapitalize="off" placeholder="https://…">
-        </label>
-        <label data-for="backend">Токен доступа (API_TOKEN)
-          <input id="sToken" type="password" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="из Render → Environment">
-          <span class="muted">Хранится только в этом браузере.</span>
-        </label>
-        <label data-for="anthropic openai backend">Модель
-          <input id="sModel" type="text" autocapitalize="off" spellcheck="false" placeholder="по умолчанию">
-        </label>
-        <label>Температура: <b id="sTempVal">0.7</b> <span class="muted">(0.7 — по умолчанию у сервиса)</span>
-          <input id="sTemp" type="range" min="0" max="2" step="0.1">
-        </label>
-        <label>Системная инструкция (необязательно)
-          <textarea id="sSystem" rows="4" placeholder="Переопределяет инструкцию с сервера"></textarea>
-        </label>
-        <label>Тема
-          <select id="sTheme">
-            <option value="auto">Как в системе</option>
-            <option value="dark">Тёмная</option>
-            <option value="light">Светлая</option>
-          </select>
-        </label>
-        <label>Размер текста
-          <select id="sFont">
-            <option value="small">Мелкий</option>
-            <option value="normal">Обычный</option>
-            <option value="large">Крупный</option>
-          </select>
-        </label>
-        <label class="check">
-          <input id="sEnter" type="checkbox">
-          <span>Enter отправляет сообщение (Shift+Enter — новая строка)</span>
-        </label>
+      <div class="settings-body">
+        <section data-tab="conn">
+          <label>Откуда брать ответы ИИ
+            <select id="sProvider">
+              <option value="demo">Демо (без ИИ)</option>
+              <option value="anthropic">Anthropic (Claude) — нужен API-ключ</option>
+              <option value="openai">OpenAI-совместимый (OpenAI, OpenRouter, Groq…)</option>
+              <option value="backend">Свой сервер (backend)</option>
+            </select>
+          </label>
+          <label data-for="anthropic openai">API-ключ
+            <input id="sKey" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="вставь ключ">
+            <span class="muted">Ключ хранится только в этом браузере и уходит только выбранному сервису.</span>
+          </label>
+          <label data-for="openai">Адрес API
+            <input id="sBase" type="url" autocapitalize="off" placeholder="https://api.openai.com/v1">
+          </label>
+          <label data-for="backend">Адрес своего сервера
+            <input id="sBackend" type="url" autocapitalize="off" placeholder="https://…onrender.com">
+          </label>
+          <label data-for="backend">Токен доступа (API_TOKEN)
+            <input id="sToken" type="password" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="из Render → Environment">
+            <span class="muted">Хранится только в этом браузере.</span>
+          </label>
+          <label data-for="anthropic openai backend">Модель
+            <input id="sModel" type="text" autocapitalize="off" spellcheck="false" placeholder="по умолчанию">
+          </label>
+          <div class="row">
+            <button class="btn" type="button" id="testBackend"><svg class="i"><use href="#i-server"/></svg><span>Проверить связь</span></button>
+          </div>
+          <div class="result muted" id="testResult"></div>
+        </section>
 
-        <div class="row">
-          <button class="btn" type="button" id="testBackend">Проверить связь</button>
-          <span id="testResult" class="muted"></span>
-        </div>
-        <div class="row">
-          <button class="btn danger" type="button" id="clearAll">Удалить все чаты</button>
-        </div>
+        <section data-tab="chat" class="hidden">
+          <label>Температура: <b id="sTempVal">0.7</b> <span class="muted">(ниже — точнее, выше — креативнее)</span>
+            <input id="sTemp" type="range" min="0" max="2" step="0.1">
+          </label>
+          <label>Системная инструкция (необязательно)
+            <textarea id="sSystem" rows="6" placeholder="Переопределяет инструкцию с сервера"></textarea>
+          </label>
+          <label class="check">
+            <input id="sEnter" type="checkbox">
+            <span>Enter отправляет сообщение (Shift+Enter — новая строка)</span>
+          </label>
+        </section>
 
-        <p class="muted" id="appVersion"></p>
-        <div class="row end">
-          <button class="btn" type="button" id="cancelSettings">Отмена</button>
-          <button class="btn primary" type="button" id="saveSettings">Сохранить</button>
-        </div>
+        <section data-tab="look" class="hidden">
+          <label>Тема
+            <select id="sTheme">
+              <option value="auto">Как в системе</option>
+              <option value="dark">Тёмная</option>
+              <option value="light">Светлая</option>
+            </select>
+          </label>
+          <label>Размер текста
+            <select id="sFont">
+              <option value="small">Мелкий</option>
+              <option value="normal">Обычный</option>
+              <option value="large">Крупный</option>
+            </select>
+          </label>
+        </section>
+
+        <section data-tab="data" class="hidden">
+          <p class="muted">Переписки на этом устройстве. Если подключён сервер, их копия хранится и там.</p>
+          <div class="row">
+            <button class="btn danger" type="button" id="clearAll"><svg class="i"><use href="#i-trash"/></svg><span>Удалить все чаты</span></button>
+          </div>
+          <p class="muted" id="appVersion"></p>
+        </section>
+      </div>
+
+      <div class="modal-foot">
+        <button class="btn" type="button" id="cancelSettings">Отмена</button>
+        <button class="btn primary" type="button" id="saveSettings">Сохранить</button>
       </div>
     </div>
   </div>
 
   <div class="toast hidden" id="toast" role="status"></div>
 
-  <script src="providers.js"></script>
-  <script src="script.js"></script>
+  <script src="providers.js?v=4"></script>
+  <script src="script.js?v=4"></script>
 </body>
 </html>

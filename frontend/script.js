@@ -1,8 +1,9 @@
 (() => {
   'use strict';
 
-  const VERSION = '2026-11-15.3';
+  const VERSION = '2026-11-15.4';
   const $ = (s, r = document) => r.querySelector(s);
+  const ico = (n, cls = '') => `<svg class="i ${cls}" aria-hidden="true"><use href="#i-${n}"/></svg>`;
   const store = {
     get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* quota / private mode */ } },
@@ -75,23 +76,36 @@
       let lang = '', code = p;
       if (nl >= 0) { lang = p.slice(0, nl).trim(); code = p.slice(nl + 1); }
       code = code.replace(/\n$/, '');
-      return `<div class="code"><div class="code-head"><span>${esc(lang || 'code')}</span><button class="copy" type="button">Копировать</button></div><pre><code>${esc(code)}</code></pre></div>`;
+      return `<div class="code"><div class="code-head"><span>${esc(lang || 'code')}</span><button class="copy" type="button">${ico('copy')}<span>Копировать</span></button></div><pre><code>${esc(code)}</code></pre></div>`;
     }).join('');
   }
 
   /* ---------- Rendering ---------- */
+  const lastTs = c => (c.messages?.length ? c.messages[c.messages.length - 1].ts : 0) || c.created || 0;
+  function dateGroup(ts) {
+    const d0 = new Date(); d0.setHours(0, 0, 0, 0);
+    const days = Math.floor((d0 - ts) / 86400000) + (ts >= d0 ? 0 : 1);
+    if (ts >= d0) return 'Сегодня';
+    if (days <= 1) return 'Вчера';
+    if (days <= 7) return 'Последние 7 дней';
+    return 'Ранее';
+  }
+
   function renderChatList() {
     const q = els.search.value.trim().toLowerCase();
-    const items = chats.filter(c => !q || c.title.toLowerCase().includes(q));
+    const items = chats.filter(c => !q || c.title.toLowerCase().includes(q))
+      .sort((a, b) => lastTs(b) - lastTs(a));
     els.list.innerHTML = '';
-    if (!items.length) { els.list.innerHTML = '<div class="empty-list">Чатов пока нет</div>'; return; }
+    if (!items.length) { els.list.innerHTML = `<div class="empty-list">${q ? 'Ничего не найдено' : 'Чатов пока нет'}</div>`; return; }
+    let group = '';
     for (const c of items) {
+      const g = dateGroup(lastTs(c));
+      if (g !== group) { group = g; const h = document.createElement('div'); h.className = 'group'; h.textContent = g; els.list.appendChild(h); }
       const row = document.createElement('div');
       row.className = 'chat-item' + (c.id === activeId ? ' active' : '');
       row.dataset.id = c.id;
       row.innerHTML = `<span class="name">${esc(c.title)}</span>
-        <button class="act" data-a="rename" title="Переименовать" aria-label="Переименовать">✎</button>
-        <button class="act" data-a="delete" title="Удалить" aria-label="Удалить">🗑</button>`;
+        <button class="act" type="button" data-a="menu" aria-haspopup="menu" title="Действия" aria-label="Действия с чатом">${ico('dots')}</button>`;
       els.list.appendChild(row);
     }
   }
@@ -101,7 +115,7 @@
     el.className = 'msg ' + m.role;
     el.dataset.idx = idx;
     const tools = m.role === 'assistant'
-      ? `<div class="msg-tools"><button data-a="copy" type="button">Копировать</button>${isLast ? '<button data-a="regen" type="button">↻ Заново</button>' : ''}</div>` : '';
+      ? `<div class="msg-tools"><button data-a="copy" type="button">${ico('copy')}<span>Копировать</span></button>${isLast ? `<button data-a="regen" type="button">${ico('refresh')}<span>Заново</span></button>` : ''}</div>` : '';
     el.innerHTML = `<div class="avatar">${m.role === 'user' ? 'Я' : 'AI'}</div><div class="body-wrap" style="flex:1;min-width:0"><div class="body"></div>${tools}</div>`;
     setBody(el, m);
     return el;
@@ -128,7 +142,7 @@
     if (!chat || !chat.messages.length) {
       const w = document.createElement('div');
       w.className = 'welcome';
-      w.innerHTML = '<h1>Чем помочь в разработке игры?</h1><p>Код, механики, баланс, архитектура — спрашивай.</p><div class="suggest"></div>';
+      w.innerHTML = '<img class="welcome-logo" src="icons/logo.svg" width="64" height="64" alt=""><h1>Чем помочь в разработке игры?</h1><p>Код, механики, баланс, архитектура — спрашивай.</p><div class="suggest"></div>';
       for (const s of SUGGESTIONS) {
         const b = document.createElement('button'); b.type = 'button'; b.textContent = s;
         b.onclick = () => { els.input.value = s; autosize(); els.input.focus(); };
@@ -149,7 +163,7 @@
     attachments.forEach((a, i) => {
       const c = document.createElement('span');
       c.className = 'chip';
-      c.innerHTML = `${esc(a.name)}<button type="button" aria-label="Убрать" data-i="${i}">✕</button>`;
+      c.innerHTML = `${esc(a.name)}<button type="button" aria-label="Убрать" data-i="${i}">${ico('x')}</button>`;
       els.chips.appendChild(c);
     });
   }
@@ -166,7 +180,7 @@
   function setBusy(b) {
     busy = b;
     els.send.classList.toggle('stop', b);
-    els.send.textContent = b ? '■' : '➤';
+    els.send.innerHTML = ico(b ? 'stop' : 'up');
     els.send.setAttribute('aria-label', b ? 'Остановить' : 'Отправить');
   }
 
@@ -198,8 +212,9 @@
     if (t && t.trim()) { c.title = t.trim().slice(0, 80); bg('PATCH', '/api/chats/' + encodeURIComponent(id), { title: c.title }); saveChats(); renderChatList(); if (id === activeId) els.title.textContent = c.title; }
   }
 
-  function exportChat() {
-    const c = active(); if (!c || !c.messages.length) return;
+  function exportChat(id) {
+    const c = id ? chats.find(x => x.id === id) : active();
+    if (!c || !c.messages.length) { toast('В чате пока нет сообщений'); return; }
     const text = c.messages.map(m => `### ${m.role === 'user' ? 'Я' : 'AI'}\n\n${m.content}\n`).join('\n');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([`# ${c.title}\n\n${text}`], { type: 'text/markdown' }));
@@ -276,6 +291,7 @@
     if (res.status === 401) throw new Error('Сервер не принял токен. Проверь «Токен доступа» в Настройках.');
     if (res.status === 503) throw new Error('Сейчас нет доступных моделей (GPU выключен, резервные не настроены). Вопрос сохранён на сервере, повтори позже.');
     if (!res.ok) throw new Error('Сервер ответил HTTP ' + res.status);
+    setConn('ok', 'Сервер на связи');
     const used = res.headers.get('X-Provider'), from = res.headers.get('X-Fallback');
     if (from && used) toast(`Основная модель недоступна, отвечает «${used}»`);
     const reader = res.body.getReader(), dec = new TextDecoder();
@@ -409,6 +425,103 @@
   }
   function hideSide() { if (isMobile()) closeMenu(); else setCollapsed(true); }
 
+  // Копирование с запасным способом (если у браузера нет доступа к буферу обмена)
+  async function copyText(text) {
+    try { await navigator.clipboard.writeText(text); return; } catch { /* пробуем запасной путь */ }
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+    document.body.appendChild(ta); ta.select(); ta.setSelectionRange(0, text.length);
+    try { document.execCommand('copy'); } finally { ta.remove(); }
+  }
+
+  function flash(btn, label = 'Скопировано') {
+    const html = btn.innerHTML;
+    btn.innerHTML = ico('check') + `<span>${label}</span>`;
+    setTimeout(() => { btn.innerHTML = html; }, 1200);
+  }
+
+  /* ---------- Всплывающее меню ---------- */
+  const pop = $('#popMenu');
+  let popOwner = null;
+  function hidePop() { pop.classList.add('hidden'); popOwner = null; }
+  function showPop(anchor, items) {
+    if (popOwner === anchor) { hidePop(); return; }          // повторное нажатие закрывает
+    pop._items = items;
+    pop.innerHTML = items.map((it, i) => it.sep ? '<div class="sep"></div>'
+      : `<button type="button" role="menuitem" data-i="${i}"${it.danger ? ' class="danger"' : ''}>${ico(it.icon)}<span>${esc(it.label)}</span></button>`).join('');
+    pop.classList.remove('hidden');
+    popOwner = anchor;
+    const r = anchor.getBoundingClientRect(), w = pop.offsetWidth, h = pop.offsetHeight;
+    const left = Math.min(Math.max(8, r.right - w), window.innerWidth - w - 8);
+    let top = r.bottom + 6;
+    if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 6);
+    pop.style.left = left + 'px'; pop.style.top = top + 'px';
+  }
+  pop.addEventListener('click', e => {
+    const b = e.target.closest('button[data-i]'); if (!b) return;
+    const it = pop._items[+b.dataset.i]; hidePop(); it.run();
+  });
+  document.addEventListener('pointerdown', e => {
+    if (pop.classList.contains('hidden') || pop.contains(e.target)) return;
+    if (e.target.closest('[data-a="menu"], #moreBtn')) return;   // их обработчик сам решит, закрыть или переключить
+    hidePop();
+  });
+  window.addEventListener('resize', hidePop);
+  els.messages.addEventListener('scroll', hidePop, { passive: true });
+
+  const THEME_NAMES = { auto: 'как в системе', dark: 'тёмная', light: 'светлая' };
+  function chatMenu(anchor, id) {
+    showPop(anchor, [
+      { icon: 'pencil', label: 'Переименовать', run: () => renameChat(id) },
+      { icon: 'download', label: 'Экспорт в Markdown', run: () => exportChat(id) },
+      { sep: true },
+      { icon: 'trash', label: 'Удалить', danger: true, run: () => deleteChat(id) },
+    ]);
+  }
+  function moreMenu(anchor) {
+    const c = active(), items = [];
+    if (c) items.push(
+      { icon: 'pencil', label: 'Переименовать чат', run: () => renameChat(c.id) },
+      { icon: 'download', label: 'Экспорт в Markdown', run: () => exportChat(c.id) },
+      { icon: 'trash', label: 'Удалить чат', danger: true, run: () => deleteChat(c.id) },
+      { sep: true });
+    items.push(
+      { icon: 'plus', label: 'Новый чат', run: newChat },
+      { icon: settings.theme === 'dark' ? 'moon' : settings.theme === 'light' ? 'sun' : 'auto', label: 'Тема: ' + THEME_NAMES[settings.theme], run: cycleTheme },
+      { icon: 'sliders', label: 'Настройки', run: openSettings });
+    showPop(anchor, items);
+  }
+
+  /* ---------- Состояние подключения ---------- */
+  let connSeq = 0;
+  function setConn(state, text) {
+    $('#connDot').className = 'dot ' + state;
+    $('#connText').textContent = text;
+  }
+  async function checkServer() {
+    const seq = ++connSeq, p = settings.provider;
+    if (p !== 'backend') {
+      setConn(p === 'demo' ? 'off' : 'ok', p === 'demo' ? 'Демо-режим: ИИ не подключён' : p === 'anthropic' ? 'Claude: прямой ключ' : 'ИИ: прямой ключ');
+      return;
+    }
+    if (!backendUrl()) { setConn('bad', 'Не указан адрес сервера'); return; }
+    const url = backendUrl();
+    setConn('wait', 'Проверяю сервер…');
+    try { if ((await fetch(url + '/api/health')).ok) { if (seq === connSeq) setConn('ok', 'Сервер на связи'); return; } } catch { /* спит */ }
+    if (seq === connSeq) setConn('wait', 'Сервер просыпается…');
+    const ok = await wakeServerAt(url);
+    if (seq === connSeq) ok ? setConn('ok', 'Сервер на связи') : setConn('bad', 'Нет связи с сервером');
+  }
+
+  /* ---------- Вкладки настроек ---------- */
+  function showTab(name) {
+    document.querySelectorAll('#settingsTabs button').forEach(b => {
+      const on = b.dataset.tab === name;
+      b.classList.toggle('on', on); b.setAttribute('aria-selected', on);
+    });
+    document.querySelectorAll('.settings-body > section[data-tab]').forEach(sec => sec.classList.toggle('hidden', sec.dataset.tab !== name));
+  }
+
   let toastTimer = null;
   function toast(text) {
     els.toast.textContent = text;
@@ -431,13 +544,15 @@
     const t = settings.theme;
     if (t === 'auto') document.documentElement.removeAttribute('data-theme');
     else document.documentElement.setAttribute('data-theme', t);
+    const use = $('#themeIcon use');
+    if (use) use.setAttribute('href', '#i-' + (t === 'dark' ? 'moon' : t === 'light' ? 'sun' : 'auto'));
   }
 
   function cycleTheme() {
     const order = ['auto', 'dark', 'light'];
     settings.theme = order[(order.indexOf(settings.theme) + 1) % order.length];
     store.set('gdai.settings', settings); applyTheme();
-    toast('Тема: ' + { auto: 'как в системе', dark: 'тёмная', light: 'светлая' }[settings.theme]);
+    toast('Тема: ' + THEME_NAMES[settings.theme]);
   }
 
   function syncProviderFields() {
@@ -464,6 +579,7 @@
     $('#sEnter').checked = !!settings.enterSend;
     $('#testResult').textContent = '';
     $('#appVersion').textContent = 'Версия интерфейса: ' + VERSION;
+    hidePop(); showTab('conn');
     els.modal.classList.remove('hidden');
   }
 
@@ -488,7 +604,7 @@
     applyTheme(); applyFont(); renderBadge();
     closeSettings();
     toast('Настройки сохранены');
-    syncFromServer();
+    syncFromServer(); checkServer();
   }
 
   async function testConnection() {
@@ -553,32 +669,36 @@
   $('#newChat').onclick = newChat;
   $('#menuBtn').onclick = toggleSide;
   $('#closeSide').onclick = hideSide;
-  $('#topSettings').onclick = openSettings;
+  $('#moreBtn').onclick = e => moreMenu(e.currentTarget);
+  $('#closeSettings').onclick = closeSettings;
   $('#backdrop').onclick = closeMenu;
   $('#themeBtn').onclick = cycleTheme;
-  $('#exportBtn').onclick = exportChat;
   $('#openSettings').onclick = openSettings;
   els.search.addEventListener('input', renderChatList);
 
   els.list.addEventListener('click', e => {
     const row = e.target.closest('.chat-item'); if (!row) return;
     const a = e.target.closest('.act');
-    if (a) { e.stopPropagation(); a.dataset.a === 'delete' ? deleteChat(row.dataset.id) : renameChat(row.dataset.id); }
+    if (a) { e.stopPropagation(); chatMenu(a, row.dataset.id); }
     else selectChat(row.dataset.id);
+  });
+  els.list.addEventListener('contextmenu', e => {            // правая кнопка мыши / долгое нажатие
+    const row = e.target.closest('.chat-item'); if (!row) return;
+    e.preventDefault(); chatMenu(row.querySelector('.act'), row.dataset.id);
   });
 
   els.messages.addEventListener('click', e => {
     const copy = e.target.closest('.copy');
     if (copy) {
       const code = copy.closest('.code').querySelector('code').textContent;
-      navigator.clipboard?.writeText(code).then(() => { copy.textContent = 'Скопировано'; setTimeout(() => copy.textContent = 'Копировать', 1200); });
+      copyText(code).then(() => flash(copy));
       return;
     }
     const t = e.target.closest('.msg-tools button'); if (!t) return;
     if (t.dataset.a === 'regen') regenerate();
     if (t.dataset.a === 'copy') {
       const m = active()?.messages[+t.closest('.msg').dataset.idx];
-      if (m) navigator.clipboard?.writeText(m.content).then(() => { t.textContent = 'Скопировано'; setTimeout(() => t.textContent = 'Копировать', 1200); });
+      if (m) copyText(m.content).then(() => flash(t));
     }
   });
 
@@ -593,18 +713,19 @@
     abortCtl?.abort(); chats = []; activeId = null; saveChats(); renderChatList(); renderMessages();
     closeSettings(); toast('Все чаты удалены');
   };
+  $('#settingsTabs').addEventListener('click', e => { const b = e.target.closest('button[data-tab]'); if (b) showTab(b.dataset.tab); });
   $('#saveSettings').onclick = saveSettings;
   $('#cancelSettings').onclick = closeSettings;
   els.modal.addEventListener('click', e => { if (e.target === els.modal) closeSettings(); });
 
   document.addEventListener('keydown', e => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); newChat(); }
-    if (e.key === 'Escape') { closeMenu(); closeSettings(); }
+    if (e.key === 'Escape') { hidePop(); closeMenu(); closeSettings(); }
   });
 
   /* ---------- Init ---------- */
   if (!chats.find(c => c.id === activeId)) activeId = chats[0]?.id || null;
   els.app.classList.toggle('side-collapsed', !!store.get('gdai.sideCollapsed', false));
   applyTheme(); applyFont(); renderBadge(); renderChatList(); renderMessages(); renderChips();
-  syncFromServer();
+  syncFromServer(); checkServer();
 })();
