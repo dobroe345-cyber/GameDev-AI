@@ -28,3 +28,7 @@ services:
         sync: false
       - key: GPU_MODEL
         sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: GITHUB_REPOS
+        value: dobroe345-cyber/GameDev-AI

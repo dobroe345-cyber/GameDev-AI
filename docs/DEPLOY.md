@@ -20,6 +20,9 @@
 
 Free-сервис засыпает через 15 минут и просыпается около минуты. Данные при этом не теряются: они в Neon и R2.
 
+### Агент кода (по желанию)
+Чтобы ИИ мог искать и менять код в GitHub, добавьте `GITHUB_TOKEN` (инструкция: [GITHUB.md](GITHUB.md)).
+
 ## 4. GPU-узел (отдельно, по желанию)
 Любой сервер с OpenAI-совместимым API (Ollama, vLLM, llama.cpp). Откройте его через Cloudflare Tunnel и задайте в Render:
 `GPU_BASE_URL` (например `https://xxx.trycloudflare.com/v1`), `GPU_MODEL`, при необходимости `GPU_API_KEY`.

@@ -21,6 +21,7 @@ def _flag(env: Mapping[str, str], name: str) -> bool:
     return env.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+DEFAULT_REPO = "dobroe345-cyber/GameDev-AI"  # репозиторий, с которым агент работает по умолчанию
 DEFAULT_ORIGIN = "https://dobroe345-cyber.github.io"  # интерфейс на GitHub Pages: работает без настройки CORS_ORIGINS
 
 
@@ -42,6 +43,9 @@ class Settings:
     lease_seconds: int
     task_max_attempts: int
     worker_enabled: bool
+    github_token: str = ""
+    github_repos: tuple[str, ...] = ()
+    github_api_url: str = "https://api.github.com"
 
     @property
     def r2_configured(self) -> bool:
@@ -83,4 +87,7 @@ class Settings:
             lease_seconds=max(10, _int(env, "LEASE_SECONDS", 60)),
             task_max_attempts=max(1, _int(env, "TASK_MAX_ATTEMPTS", 3)),
             worker_enabled=not _flag(env, "DISABLE_WORKER"),
+            github_token=env.get("GITHUB_TOKEN", "").strip(),
+            github_repos=tuple(r.strip() for r in (env.get("GITHUB_REPOS", "").strip() or DEFAULT_REPO).split(",") if r.strip()),
+            github_api_url=env.get("GITHUB_API_URL", "").strip() or "https://api.github.com",
         )

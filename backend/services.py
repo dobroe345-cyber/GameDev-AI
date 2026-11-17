@@ -4,10 +4,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import agents  # noqa: F401  (регистрирует типы задач)
+import code_agent  # noqa: F401  (задача «code»: агент работает с GitHub)
 from ai_core import ModelRouter
 from chat import ChatService
 from db import Database
 from file_manager import FileService
+from github_client import GitHub
 from memory import Memory
 from settings import Settings
 from storage import ObjectStorage, build_storage
@@ -25,6 +27,7 @@ class Services:
     chat: ChatService
     tasks: TaskStore
     worker: TaskWorker
+    github: GitHub | None = None
 
     def warnings(self) -> list[str]:
         w = []
@@ -41,19 +44,21 @@ class Services:
         return w
 
 
-def build_services(settings: Settings, *, router: ModelRouter | None = None, storage: ObjectStorage | None = None) -> Services:
+def build_services(settings: Settings, *, router: ModelRouter | None = None, storage: ObjectStorage | None = None,
+                   github: GitHub | None = None) -> Services:
     db = Database(settings.database_url)
     db.migrate()
     memory = Memory(db)
     storage = storage or build_storage(settings)
     files = FileService(db, storage, settings.max_file_bytes)
     router = router or ModelRouter.from_settings(settings)
+    github = github or GitHub.from_settings(settings)
     tasks = TaskStore(db)
     worker = TaskWorker(
-        tasks, {"router": router, "memory": memory, "files": files},
+        tasks, {"router": router, "memory": memory, "files": files, "github": github},
         lease_s=settings.lease_seconds, max_attempts=settings.task_max_attempts,
     )
-    return Services(settings, db, memory, storage, files, router, ChatService(memory, router), tasks, worker)
+    return Services(settings, db, memory, storage, files, router, ChatService(memory, router), tasks, worker, github)
 
 
 def startup(svc: Services) -> None:

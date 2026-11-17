@@ -87,6 +87,7 @@ pytest tests
 
 - Архитектура и что где хранится: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - Пошаговое развёртывание на бесплатных тарифах: [docs/DEPLOY.md](docs/DEPLOY.md)
+- Агент кода (GitHub, pull request): [docs/BODY.md](docs/BODY.md), токен: [docs/GITHUB.md](docs/GITHUB.md)
 - Проверка после деплоя: `python scripts/smoke_test.py https://ВАШ.onrender.com ТОКЕН`
 - Тесты: `pip install -r requirements-dev.txt && pytest`
 

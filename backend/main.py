@@ -28,7 +28,7 @@ from settings import Settings
 from storage import StorageError
 from tasks import HANDLERS
 
-VERSION = "0.2.2"
+VERSION = "0.3.0"
 ID_RE = r"^[A-Za-z0-9_-]{1,64}$"
 KEY_RE = r"^[A-Za-z0-9_.-]{1,64}$"
 SECRET_WORDS = ("key", "token", "secret", "password", "passwd")
@@ -124,6 +124,7 @@ def status(request: Request, deep: bool = False):
         "storage": {"kind": s.storage.kind, "persistent": s.storage.persistent},
         "models": s.router.status(),
         "worker": {"enabled": s.settings.worker_enabled},
+        "github": {"connected": s.github is not None, "repos": list(s.github.repos) if s.github else []},
         "tasks": s.tasks.counts(),
         "warnings": s.warnings(),
     }
