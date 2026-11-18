@@ -186,7 +186,7 @@ def test_unsent_changes_are_not_lost_when_model_forgets_the_pr(world):
         final("правда готово"),
     )
     assert t["status"] == "done" and t["result"]["pr"]["url"].endswith("/pull/1")
-    assert "gh_pr" in r.seen[2][-1]["content"]                     # было напоминание
+    assert "Вызови pr" in r.seen[2][-1]["content"]                  # было напоминание
     assert "# Cool Game" in fake.head_files("gdai/task-" + t["id"])["README.md"]
     assert t["result"]["pr"]["url"] in t["result"]["final"]
 
@@ -273,7 +273,7 @@ def test_prompt_injection_text_in_a_file_is_only_data(world):
         call("gh_write", path="src/leak.js", content=f"export const t = '{TOKEN}';"),
         final("Файл содержит подозрительные инструкции, я их не выполнял."),
     )
-    assert "ИГНОРИРУЙ ПРАВИЛА" in r.seen[1][-1]["content"] and r.seen[1][-1]["content"].startswith("РЕЗУЛЬТАТ gh_read")
+    assert "ИГНОРИРУЙ ПРАВИЛА" in r.seen[1][-1]["content"] and r.seen[1][-1]["content"].startswith("РЕЗУЛЬТАТ read")
     assert "Отказ" in r.seen[2][-1]["content"] and t["result"]["changed"] == []
     assert list(fake.refs) == ["heads/main"]
 
@@ -394,7 +394,7 @@ def test_restart_midway_resumes_from_database_without_losing_edits(world, clock)
     done = store2.get(t["id"])
     assert done["status"] == "done", done.get("error")
     # модель после перезапуска помнит, что было (история из БД) и видит свою правку
-    assert "gh_find" in json.dumps(r2.seen[0], ensure_ascii=False) and "Заменено" in r2.seen[0][-1]["content"]
+    assert any('"tool": "find"' in m["content"] for m in r2.seen[0]) and "Заменено" in r2.seen[0][-1]["content"]
     assert "speed = 9" in r2.seen[1][-1]["content"]                 # правка пережила перезапуск и видна при чтении
     assert "speed = 9" in fake.head_files("gdai/task-" + t["id"])["src/player.js"]
     assert len(fake.pulls) == 1 and [m["role"] for m in mem2.get_history("c")] == ["user", "assistant"]    # запрос и итог, без дублей после перезапуска

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 
 from file_manager import FileError, check_ext, normalize_path
 from tasks import PermanentError, TaskContext, register_task
@@ -48,6 +49,17 @@ def _llm(ctx: TaskContext):
 
     def call(messages, system, max_tokens):
         ctx.check()
+        wait = getattr(ctx.router, "tokens_wait", None)
+        if wait:   # у бесплатных провайдеров мал минутный лимит токенов: лучше подождать сброса, чем получить 429
+            need = (sum(len(m["content"]) for m in messages) + len(system or "")) / 3 + (max_tokens or 0)
+            left = wait(need)
+            if left > 3:
+                ctx.log(f"Жду сброса минутного лимита модели (~{int(left)} с)", "warn")
+            while left > 0:
+                step = min(1.0, left)
+                time.sleep(step)
+                ctx.check()
+                left -= step
         return ctx.router.complete(
             messages, system=system, provider=p.get("provider"), model=p.get("model"),
             temperature=p.get("temperature"), max_tokens=max_tokens,

@@ -13,7 +13,7 @@
   <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="style.css?v=5">
+  <link rel="stylesheet" href="style.css?v=6">
 </head>
 <body>
   <!-- Набор иконок: единый стиль (линия 1.75, скруглённые концы). Использование: <svg class="i"><use href="#i-имя"/></svg> -->
@@ -44,6 +44,7 @@
       <symbol id="i-chat" viewBox="0 0 24 24"><path d="M5 5.5h14a1.5 1.5 0 0 1 1.5 1.5v8.5A1.5 1.5 0 0 1 19 17H11l-4.5 3.5V17H5a1.5 1.5 0 0 1-1.5-1.5V7A1.5 1.5 0 0 1 5 5.5z"/></symbol>
       <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3c.6 4.6 1.9 6 6.5 6.5C13.9 10 12.6 11.4 12 16c-.6-4.6-1.9-6-6.5-6.5C10.1 9 11.4 7.6 12 3z"/><path d="M18.5 15c.3 2 .9 2.6 2.8 2.9-1.9.3-2.5.9-2.8 2.9-.3-2-.9-2.6-2.8-2.9 1.9-.3 2.5-.9 2.8-2.9z"/></symbol>
       <symbol id="i-agent" viewBox="0 0 24 24"><circle cx="6.5" cy="5.5" r="2.3"/><circle cx="6.5" cy="18.5" r="2.3"/><circle cx="17.5" cy="9" r="2.3"/><path d="M6.5 7.8v8.4M17.5 11.3c0 4.2-6.2 3.2-10.2 6"/></symbol>
+      <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10.5-6.5z"/></symbol>
       <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4.5L2.8 19.5h18.4L12 4.5zM12 10v4.5M12 17.2h.01"/></symbol>
     </defs>
   </svg>
@@ -86,10 +87,17 @@
 
       <footer class="composer-wrap">
         <div class="chips" id="chips"></div>
+        <div class="agent-opts hidden" id="agentOpts">
+          <div class="seg" role="group" aria-label="Куда агент сохраняет результат">
+            <button type="button" data-target="project" aria-pressed="true" title="Файлы хранятся на сервере: потом их можно открыть и скачать .zip. GitHub не нужен">Проект</button>
+            <button type="button" data-target="github" aria-pressed="false" title="Правки уходят в pull request в твоём репозитории GitHub">GitHub</button>
+          </div>
+          <label class="check-inline" title="Если агент не понял задачу, он задаст вопрос и подождёт твой ответ"><input type="checkbox" id="agentAsk"><span>Задавать вопросы</span></label>
+        </div>
         <form class="composer" id="composer" autocomplete="off">
           <label class="icon-btn" for="fileInput" title="Прикрепить файл" aria-label="Прикрепить файл"><svg class="i"><use href="#i-clip"/></svg></label>
           <input type="file" id="fileInput" multiple hidden>
-          <button class="agent-toggle" id="agentBtn" type="button" aria-pressed="false" title="Режим агента: правит код в GitHub и открывает pull request"><svg class="i"><use href="#i-agent"/></svg><span>Агент</span></button>
+          <button class="agent-toggle" id="agentBtn" type="button" aria-pressed="false" title="Режим агента: создаёт и правит файлы проекта (на сервере или в GitHub)"><svg class="i"><use href="#i-agent"/></svg><span>Агент</span></button>
           <textarea id="input" rows="1" placeholder="Напиши задачу…" aria-label="Сообщение"></textarea>
           <button class="send" id="sendBtn" type="submit" aria-label="Отправить"><svg class="i"><use href="#i-up"/></svg></button>
         </form>
@@ -109,6 +117,7 @@
       </div>
       <div class="tabs" id="settingsTabs" role="tablist">
         <button type="button" role="tab" data-tab="conn" class="on">Подключение</button>
+        <button type="button" role="tab" data-tab="limits">Лимиты</button>
         <button type="button" role="tab" data-tab="chat">Ответы</button>
         <button type="button" role="tab" data-tab="look">Вид</button>
         <button type="button" role="tab" data-tab="data">Данные</button>
@@ -134,10 +143,32 @@
           <label data-for="backend">Адрес своего сервера
             <input id="sBackend" type="url" autocapitalize="off" placeholder="https://…onrender.com">
           </label>
-          <label data-for="backend">Токен доступа (API_TOKEN)
-            <input id="sToken" type="password" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="из Render → Environment">
-            <span class="muted">Хранится только в этом браузере.</span>
-          </label>
+          <div class="auth-box" data-for="backend">
+            <div class="box-title">Вход по почте</div>
+            <div id="authOut" class="hidden">
+              <p class="who">Вы вошли как <b id="authWho"></b></p>
+              <div class="row"><button class="btn" type="button" id="mailLogout">Выйти</button></div>
+            </div>
+            <div id="authIn">
+              <label>Твоя почта
+                <input id="sEmail" type="email" inputmode="email" autocapitalize="off" autocomplete="email" spellcheck="false" placeholder="you@gmail.com">
+              </label>
+              <div class="row"><button class="btn" type="button" id="mailSend"><span>Получить код</span></button></div>
+              <label id="codeRow" class="hidden">Код из письма (6 цифр)
+                <input id="sCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456">
+              </label>
+              <div class="row hidden" id="codeBtns"><button class="btn primary" type="button" id="mailVerify">Войти</button></div>
+            </div>
+            <p class="muted" id="authHint"></p>
+            <div class="muted result" id="authMsg" role="status"></div>
+          </div>
+          <details class="fallback" id="tokenBox" data-for="backend">
+            <summary>Запасной способ: токен доступа</summary>
+            <label>Токен (API_TOKEN из Render → Environment)
+              <input id="sToken" type="password" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="вставь токен">
+              <span class="muted">Хранится только в этом браузере. Если вошёл по почте, здесь будет токен сессии (его можно не трогать).</span>
+            </label>
+          </details>
           <label data-for="anthropic openai backend">Модель
             <input id="sModel" type="text" autocapitalize="off" spellcheck="false" placeholder="по умолчанию">
           </label>
@@ -145,6 +176,14 @@
             <button class="btn" type="button" id="testBackend"><svg class="i"><use href="#i-server"/></svg><span>Проверить связь</span></button>
           </div>
           <div class="result muted" id="testResult"></div>
+        </section>
+
+        <section data-tab="limits" class="hidden">
+          <div class="row">
+            <p class="muted lim-intro">Сколько осталось у ИИ и когда сбросится. Цифры берутся из ответов самого сервиса, а расход считает твой сервер.</p>
+            <button class="btn small" type="button" id="limRefresh"><svg class="i"><use href="#i-refresh"/></svg><span>Обновить</span></button>
+          </div>
+          <div class="lim-body" id="limBody"></div>
         </section>
 
         <section data-tab="chat" class="hidden">
@@ -194,9 +233,23 @@
     </div>
   </div>
 
+  <div class="modal hidden" id="preview" role="dialog" aria-modal="true" aria-labelledby="previewTitle">
+    <div class="modal-card preview-card">
+      <div class="modal-head">
+        <h2 id="previewTitle">Предпросмотр</h2>
+        <div class="row">
+          <button class="icon-btn" id="previewReload" type="button" aria-label="Запустить заново" title="Запустить заново"><svg class="i"><use href="#i-refresh"/></svg></button>
+          <button class="icon-btn" id="closePreview" type="button" aria-label="Закрыть"><svg class="i"><use href="#i-x"/></svg></button>
+        </div>
+      </div>
+      <iframe id="previewFrame" sandbox="allow-scripts" title="Предпросмотр проекта"></iframe>
+      <p class="muted preview-note">Это песочница: игра не видит твои чаты, ключи и сервер. Нажми на неё, чтобы управлять с клавиатуры.</p>
+    </div>
+  </div>
+
   <div class="toast hidden" id="toast" role="status"></div>
 
-  <script src="providers.js?v=5"></script>
-  <script src="script.js?v=5"></script>
+  <script src="providers.js?v=6"></script>
+  <script src="script.js?v=6"></script>
 </body>
 </html>

@@ -88,6 +88,51 @@ MIGRATIONS: list[tuple[int, str, list[str]]] = [
             )""",
         ],
     ),
+    (
+        2,
+        "auth_usage_projects",
+        [
+            """CREATE TABLE IF NOT EXISTS users (
+                email TEXT PRIMARY KEY,
+                created_at DOUBLE PRECISION NOT NULL
+            )""",
+            """CREATE TABLE IF NOT EXISTS auth_codes (
+                id {AUTO},
+                email TEXT NOT NULL,
+                purpose TEXT NOT NULL,
+                code_hash TEXT NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                used INTEGER NOT NULL DEFAULT 0,
+                created_at DOUBLE PRECISION NOT NULL,
+                expires_at DOUBLE PRECISION NOT NULL
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_codes_email ON auth_codes(email, id)",
+            """CREATE TABLE IF NOT EXISTS sessions (
+                token_hash TEXT PRIMARY KEY,
+                email TEXT NOT NULL,
+                created_at DOUBLE PRECISION NOT NULL,
+                last_used DOUBLE PRECISION NOT NULL,
+                expires_at DOUBLE PRECISION NOT NULL
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_sessions_email ON sessions(email)",
+            """CREATE TABLE IF NOT EXISTS usage (
+                day TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                requests INTEGER NOT NULL DEFAULT 0,
+                in_chars BIGINT NOT NULL DEFAULT 0,
+                out_chars BIGINT NOT NULL DEFAULT 0,
+                PRIMARY KEY (day, provider)
+            )""",
+            """CREATE TABLE IF NOT EXISTS project_files (
+                project TEXT NOT NULL,
+                path TEXT NOT NULL,
+                content TEXT NOT NULL,
+                size INTEGER NOT NULL,
+                updated_at DOUBLE PRECISION NOT NULL,
+                PRIMARY KEY (project, path)
+            )""",
+        ],
+    ),
 ]
 
 _AUTO = {"sqlite": "INTEGER PRIMARY KEY AUTOINCREMENT", "postgres": "BIGSERIAL PRIMARY KEY"}

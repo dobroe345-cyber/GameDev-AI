@@ -9,6 +9,7 @@ from __future__ import annotations
 import http.client
 import json
 import os
+import re
 import ssl
 import threading
 import time
@@ -95,6 +96,44 @@ def _connect(url: str, connect_timeout: float, read_timeout: float) -> tuple[htt
     return conn, path
 
 
+_local = threading.local()   # получатель заголовков ответа: ставится роутером на время запроса к провайдеру
+
+
+def _note_headers(resp: http.client.HTTPResponse) -> None:
+    sink = getattr(_local, "sink", None)
+    if sink:
+        try:
+            sink(resp)
+        except Exception:   # учёт лимитов никогда не должен ломать ответ модели
+            pass
+
+
+_DUR = re.compile(r"(\d+(?:\.\d+)?)(ms|h|m|s)")
+
+
+def parse_duration(text: str | None) -> float | None:
+    """'2m59.56s' -> 179.56; '7.66s' -> 7.66; '45' -> 45.0; нераспознанное -> None."""
+    if not text:
+        return None
+    text = text.strip()
+    try:
+        return float(text)
+    except ValueError:
+        pass
+    parts = _DUR.findall(text)
+    if not parts or "".join(a + b for a, b in parts) != text:
+        return None
+    mult = {"ms": 0.001, "s": 1, "m": 60, "h": 3600}
+    return sum(float(a) * mult[b] for a, b in parts)
+
+
+def _int_header(v: str | None) -> int | None:
+    try:
+        return int(float(v)) if v not in (None, "") else None
+    except ValueError:
+        return None
+
+
 def _error_text(resp: http.client.HTTPResponse) -> str:
     try:
         raw = resp.read(2000).decode("utf-8", "replace")
@@ -119,6 +158,7 @@ def http_lines(url: str, headers: dict, body: dict | None, connect_timeout: floa
             resp = conn.getresponse()
         except (OSError, http.client.HTTPException) as e:
             raise ProviderError(f"ошибка запроса ({type(e).__name__})") from e
+        _note_headers(resp)
         if resp.status >= 400:
             raise ProviderError(f"HTTP {resp.status} {_error_text(resp)}".strip(), resp.status)
         while True:
@@ -278,6 +318,8 @@ class ModelRouter:
         self._lock = threading.Lock()
         self._down_until: dict[str, float] = {}
         self._last_error: dict[str, str] = {}
+        self._limits: dict[str, dict] = {}
+        self.on_usage: Callable[[str, int, int, int], None] | None = None   # (провайдер, запросов, симв. на входе, симв. на выходе)
 
     @classmethod
     def from_settings(cls, settings, env: Mapping[str, str] | None = None) -> "ModelRouter":
@@ -322,6 +364,64 @@ class ModelRouter:
                 "state": "unconfigured" if not s.configured else ("down" if down > 0 else "ok"),
                 "retry_in_s": max(0, round(down)), "last_error": err,
             })
+        return out
+
+    # -------------------------------------------------------------- лимиты
+    def _record_limits(self, pid: str, resp) -> None:
+        """Запоминает заголовки x-ratelimit-* (OpenAI-совместимый формат, их отдаёт Groq): сколько осталось и когда сброс."""
+        get = lambda n: resp.getheader(n)
+        now = time.time()
+        info: dict[str, Any] = {"seen_at": now}
+        for kind in ("requests", "tokens"):
+            lim, rem = _int_header(get(f"x-ratelimit-limit-{kind}")), _int_header(get(f"x-ratelimit-remaining-{kind}"))
+            reset = parse_duration(get(f"x-ratelimit-reset-{kind}"))
+            if lim is not None or rem is not None:
+                info[kind] = {"limit": lim, "remaining": rem, "reset_at": None if reset is None else now + reset}
+        retry = parse_duration(get("retry-after"))
+        if retry is not None and resp.status == 429:
+            info["retry_at"] = now + retry
+        if len(info) > 1:
+            with self._lock:
+                self._limits[pid] = info
+
+    def tokens_wait(self, need_tokens: float) -> float:
+        """Сколько секунд стоит подождать до сброса минутного лимита токенов, чтобы запрос на ~need_tokens не упёрся в 429.
+        0, если лимит неизвестен, достаточен или уже сброшен."""
+        now = time.time()
+        for pid in self.chain:
+            s = self.specs.get(pid)
+            if not s or not s.configured or s.type == "stub" or self._is_down(pid):
+                continue
+            with self._lock:
+                k = (self._limits.get(pid) or {}).get("tokens")
+            if k and k["remaining"] is not None and k["reset_at"] and k["remaining"] < need_tokens:
+                return max(0.0, min(65.0, k["reset_at"] - now))
+            return 0.0
+        return 0.0
+
+    def limits(self) -> list[dict]:
+        """Что провайдер сообщил о лимитах в последнем ответе (пусто, пока не было ни одного запроса)."""
+        now = time.time()
+        out = []
+        for pid in dict.fromkeys(self.chain + list(self.specs)):
+            s = self.specs[pid]
+            if s.type == "stub" or not s.configured:
+                continue
+            with self._lock:
+                info = dict(self._limits.get(pid) or {})
+            item: dict[str, Any] = {"id": pid, "label": s.label or pid, "model": s.model, "data": bool(info)}
+            if info:
+                item["seen_ago_s"] = max(0, round(now - info["seen_at"]))
+                for kind in ("requests", "tokens"):
+                    k = info.get(kind)
+                    if k:
+                        reset_in = None if k["reset_at"] is None else max(0, round(k["reset_at"] - now))
+                        # если время сброса уже прошло, лимит восстановился: остаток точно неизвестен, но не меньше прежнего
+                        item[kind] = {"limit": k["limit"], "remaining": k["remaining"], "reset_in_s": reset_in,
+                                      "reset_passed": k["reset_at"] is not None and k["reset_at"] < now}
+                if info.get("retry_at") and info["retry_at"] > now:
+                    item["retry_in_s"] = round(info["retry_at"] - now)
+            out.append(item)
         return out
 
     def check(self, pid: str, timeout: float = 4.0) -> bool:
@@ -369,6 +469,7 @@ class ModelRouter:
                 self._mark_up(p)
                 return StreamHandle(p, "", _stub_notice(errors, self._unconfigured()), list(errors))
             use_model = self._model_for(spec, model)
+            _local.sink = lambda resp, p=p: self._record_limits(p, resp)
             try:
                 gen = _TYPES[spec.type](spec, msgs, use_model, temperature, max_tokens, sys_text)
                 first = next(gen, None)  # здесь выясняется, жив ли провайдер
@@ -376,12 +477,29 @@ class ModelRouter:
                 self._mark_down(p, e)
                 errors[p] = self._last_error[p]
                 continue
+            finally:
+                _local.sink = None
             self._mark_up(p)
             chunks = iter(()) if first is None else _chain_first(first, gen)
+            chunks = self._counted(p, chunks, sum(len(m["content"]) for m in msgs) + len(sys_text))
             return StreamHandle(p, use_model, chunks, list(errors))
         for p in order:
             errors.setdefault(p, self._last_error.get(p, "недоступен"))
         raise ProvidersUnavailable(errors)
+
+    def _counted(self, pid: str, chunks: Iterator[str], in_chars: int) -> Iterator[str]:
+        """Считает расход: один запрос, символы на входе и выходе (записывается, когда поток закончился или закрыт)."""
+        out = 0
+        try:
+            for c in chunks:
+                out += len(c)
+                yield c
+        finally:
+            if self.on_usage and self.specs[pid].type != "stub":
+                try:
+                    self.on_usage(pid, 1, in_chars, out)
+                except Exception:
+                    pass
 
     def _unconfigured(self) -> dict[str, str]:
         return {p: self.specs[p].reason for p in self.chain if p in self.specs and self.specs[p].reason}

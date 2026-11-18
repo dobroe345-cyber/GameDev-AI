@@ -46,6 +46,11 @@ class Settings:
     github_token: str = ""
     github_repos: tuple[str, ...] = ()
     github_api_url: str = "https://api.github.com"
+    mail_provider: str = "resend"
+    mail_api_key: str = ""
+    mail_from: str = "GameDev AI <onboarding@resend.dev>"
+    mail_api_url: str = ""
+    allowed_emails: tuple[str, ...] = ()
 
     @property
     def r2_configured(self) -> bool:
@@ -90,4 +95,9 @@ class Settings:
             github_token=env.get("GITHUB_TOKEN", "").strip(),
             github_repos=tuple(r.strip() for r in (env.get("GITHUB_REPOS", "").strip() or DEFAULT_REPO).split(",") if r.strip()),
             github_api_url=env.get("GITHUB_API_URL", "").strip() or "https://api.github.com",
+            mail_provider=(env.get("MAIL_PROVIDER", "").strip() or "resend").lower(),
+            mail_api_key=env.get("MAIL_API_KEY", "").strip(),
+            mail_from=env.get("MAIL_FROM", "").strip() or "GameDev AI <onboarding@resend.dev>",
+            mail_api_url=env.get("MAIL_API_URL", "").strip(),
+            allowed_emails=tuple(dict.fromkeys(e.strip().lower() for e in env.get("ALLOWED_EMAILS", "").split(",") if "@" in e)),
         )

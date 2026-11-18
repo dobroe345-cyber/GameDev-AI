@@ -18,6 +18,7 @@ class Fake:
     def __init__(self, behavior="ok", kind="openai", tokens=("При", "вет", "!")):
         self.behavior, self.kind, self.tokens = behavior, kind, tokens
         self.requests: list[dict] = []
+        self.extra_headers: dict[str, str] = {}   # например x-ratelimit-*: как их отдаёт Groq
         outer = self
 
         class H(BaseHTTPRequestHandler):
@@ -41,14 +42,18 @@ class Fake:
                 if b == "hang":
                     threading.Event().wait(3)
                     return
-                if b in ("500", "401"):
+                if b in ("500", "401", "429"):
                     msg = json.dumps({"error": {"message": "Incorrect API key provided: sk-SECRET123456"}}).encode()
                     self.send_response(int(b))
+                    for k, v in outer.extra_headers.items():
+                        self.send_header(k, v)
                     self.send_header("Content-Length", str(len(msg)))
                     self.end_headers()
                     self.wfile.write(msg)
                     return
                 self.send_response(200)
+                for k, v in outer.extra_headers.items():
+                    self.send_header(k, v)
                 self.send_header("Content-Type", "text/event-stream")
                 self.send_header("Transfer-Encoding", "chunked")
                 self.end_headers()

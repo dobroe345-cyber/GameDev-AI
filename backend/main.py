@@ -21,14 +21,16 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response, StreamingResponse
 
 from ai_core import ProviderError, ProvidersUnavailable
+from auth import AuthError
 from db import DatabaseError
 from file_manager import FileError, is_text
+from projects import ProjectError
 from services import Services, build_services, shutdown, startup
 from settings import Settings
 from storage import StorageError
 from tasks import HANDLERS
 
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 ID_RE = r"^[A-Za-z0-9_-]{1,64}$"
 KEY_RE = r"^[A-Za-z0-9_.-]{1,64}$"
 SECRET_WORDS = ("key", "token", "secret", "password", "passwd")
@@ -66,6 +68,21 @@ class TaskCreate(BaseModel):
     chat_id: Optional[str] = Field(default=None, pattern=ID_RE)
 
 
+class EmailBody(BaseModel):
+    email: str = Field(max_length=200)
+
+
+class VerifyBody(BaseModel):
+    email: str = Field(max_length=200)
+    code: str = Field(max_length=20)
+
+
+class AnswerBody(BaseModel):
+    text: str = Field(default="", max_length=1000)
+    auto: bool = False                       # «Решай сам»
+    qid: Optional[int] = None                # номер вопроса: защита от устаревшего ответа
+
+
 class ArchiveBody(BaseModel):
     prefix: str = Field(default="", max_length=300)
     name: str = Field(default="project", max_length=60)
@@ -80,17 +97,38 @@ def svc(request: Request) -> Services:
     return request.app.state.svc
 
 
+def _bearer(request: Request) -> str:
+    header = request.headers.get("authorization", "")
+    return header[7:].strip() if header.lower().startswith("bearer ") else ""
+
+
+def authed_as(request: Request) -> str | None:
+    """Кто вошёл: 'token' (API_TOKEN), e-mail (сессия после входа по почте) или None."""
+    s: Settings = request.app.state.settings
+    token = _bearer(request)
+    if not token:
+        return None
+    if s.api_token and hmac.compare_digest(token.encode(), s.api_token.encode()):
+        return "token"
+    auth = svc(request).auth
+    email = auth.check_session(token) if auth else None
+    if email:
+        request.state.session = token
+    return email
+
+
 def require_auth(request: Request) -> None:
-    """Все /api/*, кроме /api/health, требуют `Authorization: Bearer <API_TOKEN>`."""
+    """Все /api/*, кроме /api/health и входа по почте, требуют `Authorization: Bearer <API_TOKEN или токен сессии>`."""
     s: Settings = request.app.state.settings
     if s.allow_no_auth:
         return
+    who = authed_as(request)
+    if who:
+        request.state.user = who
+        return
     if not s.api_token:
         raise HTTPException(503, "На сервере не задан API_TOKEN")
-    header = request.headers.get("authorization", "")
-    token = header[7:].strip() if header.lower().startswith("bearer ") else ""
-    if not hmac.compare_digest(token.encode(), s.api_token.encode()):
-        raise HTTPException(401, "Неверный или отсутствующий токен доступа")
+    raise HTTPException(401, "Неверный или отсутствующий токен доступа")
 
 
 def attachment_headers(name: str) -> dict:
@@ -125,6 +163,7 @@ def status(request: Request, deep: bool = False):
         "models": s.router.status(),
         "worker": {"enabled": s.settings.worker_enabled},
         "github": {"connected": s.github is not None, "repos": list(s.github.repos) if s.github else []},
+        "auth": {"email_login": bool(s.auth and s.auth.enabled)},
         "tasks": s.tasks.counts(),
         "warnings": s.warnings(),
     }
@@ -226,9 +265,17 @@ def create_task(body: TaskCreate, request: Request):
     return task
 
 
+def task_view(task: dict) -> dict:
+    """Что отдаётся наружу: без внутреннего состояния (история переписки с моделью, тексты файлов), только нужное интерфейсу."""
+    st = task.get("state") or {}
+    out = {k: v for k, v in task.items() if k != "state"}
+    out["state"] = {k: st[k] for k in ("question", "mode", "project", "pr", "saved") if st.get(k) is not None}
+    return out
+
+
 @private.get("/tasks")
 def list_tasks(request: Request, status: Optional[str] = None, chat_id: Optional[str] = None, limit: int = 50):
-    return svc(request).tasks.list(status, chat_id, limit)
+    return [task_view(t) for t in svc(request).tasks.list(status, chat_id, limit)]
 
 
 @private.get("/tasks/{task_id}")
@@ -237,7 +284,23 @@ def get_task(task_id: str, request: Request):
     task = s.tasks.get(task_id)
     if not task:
         raise HTTPException(404, "Задача не найдена")
-    return {**task, "events": s.tasks.events(task_id)}
+    return {**task_view(task), "events": s.tasks.events(task_id)}
+
+
+@private.post("/tasks/{task_id}/answer")
+def answer_task(task_id: str, body: AnswerBody, request: Request):
+    """Ответ человека на вопрос агента (или «Решай сам»): задача возвращается в очередь и продолжается."""
+    s = svc(request)
+    text = body.text.strip()
+    if not text and not body.auto:
+        raise HTTPException(400, "Напишите ответ или нажмите «Решай сам»")
+    res = s.tasks.answer(task_id, {"text": text or "решай сам: выбери лучший вариант", "auto": body.auto}, body.qid)
+    if res == "not_waiting":
+        raise HTTPException(409, "Задача сейчас не ждёт ответа")
+    if res == "stale":
+        raise HTTPException(409, "Этот вопрос уже устарел")
+    s.worker.notify()
+    return {"ok": True}
 
 
 @private.post("/tasks/{task_id}/cancel")
@@ -252,6 +315,96 @@ def retry_task(task_id: str, request: Request):
     if ok:
         s.worker.notify()
     return {"retried": ok}
+
+
+# ---------------------------------------------------------------------- вход по почте
+@public.get("/auth/info")
+def auth_info(request: Request):
+    a = svc(request).auth
+    return {"email_login": bool(a and a.enabled)}
+
+
+@public.post("/auth/request")
+def auth_request(body: EmailBody, request: Request):
+    """Присылает код на почту. Если вызвано с рабочим токеном: привязка почты (она станет разрешённой для входа)."""
+    s = svc(request)
+    link = bool(authed_as(request))
+    try:
+        s.auth.request_code(body.email, link=link)
+    except AuthError as e:
+        raise HTTPException(e.status, str(e))
+    return {"sent": True, "link": link}
+
+
+@public.post("/auth/verify")
+def auth_verify(body: VerifyBody, request: Request):
+    try:
+        return svc(request).auth.verify(body.email, body.code)
+    except AuthError as e:
+        raise HTTPException(e.status, str(e))
+
+
+@private.get("/auth/me")
+def auth_me(request: Request):
+    return {"user": getattr(request.state, "user", None)}
+
+
+@private.post("/auth/logout")
+def auth_logout(request: Request):
+    token = getattr(request.state, "session", None)
+    return {"ok": True, "revoked": bool(token and svc(request).auth.logout(token))}
+
+
+# ---------------------------------------------------------------------- лимиты
+@private.get("/limits")
+def limits(request: Request):
+    """Лимиты провайдера (из его же ответов: сколько осталось и когда сброс) и расход через этот сервер по дням (UTC)."""
+    s = svc(request)
+    return {"providers": s.router.limits(), "usage": s.usage.summary(), "time": time.time()}
+
+
+# ---------------------------------------------------------------------- проекты агента (без GitHub)
+@private.get("/projects")
+def list_projects(request: Request):
+    return svc(request).projects.projects()
+
+
+@private.get("/projects/{project}/files")
+def project_files(request: Request, project: str):
+    return svc(request).projects.listing(project)
+
+
+@private.get("/projects/{project}/file")
+def project_file(request: Request, project: str, path: str):
+    try:
+        text = svc(request).projects.get(project, path)
+    except Exception as e:
+        raise HTTPException(400, str(e))
+    if text is None:
+        raise HTTPException(404, "Файл не найден")
+    return Response(text, media_type="text/plain; charset=utf-8", headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"})
+
+
+@private.get("/projects/{project}/zip")
+def project_zip(request: Request, project: str):
+    s = svc(request)
+    if not s.projects.listing(project):
+        raise HTTPException(404, "Проект пуст или не найден")
+    return Response(s.projects.zip_bytes(project), media_type="application/zip", headers=attachment_headers(f"{project}.zip"))
+
+
+@private.get("/projects/{project}/preview")
+def project_preview(request: Request, project: str):
+    """Один html-документ для предпросмотра. Отдаётся как text/plain: показывать его нужно в песочнице (iframe sandbox) на стороне интерфейса."""
+    html = svc(request).projects.preview_html(project)
+    if html is None:
+        raise HTTPException(404, "В проекте нет html-файла")
+    return Response(html, media_type="text/plain; charset=utf-8", headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "no-store"})
+
+
+@private.delete("/projects/{project}")
+def delete_project(request: Request, project: str):
+    return {"deleted": svc(request).projects.delete_project(project)}
 
 
 # ---------------------------------------------------------------------- файлы
@@ -379,6 +532,10 @@ def create_app(settings: Optional[Settings] = None, factory: Callable[[Settings]
     @app.exception_handler(FileError)
     async def _file_error(request: Request, exc: FileError):
         return JSONResponse({"detail": str(exc)}, status_code=exc.status)
+
+    @app.exception_handler(ProjectError)
+    async def _project_error(request: Request, exc: ProjectError):
+        return JSONResponse({"detail": str(exc)}, status_code=400)
 
     @app.exception_handler(StorageError)
     async def _storage_error(request: Request, exc: StorageError):

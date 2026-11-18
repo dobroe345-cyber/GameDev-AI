@@ -30,5 +30,9 @@ services:
         sync: false
       - key: GITHUB_TOKEN
         sync: false
+      - key: MAIL_API_KEY
+        sync: false
+      - key: ALLOWED_EMAILS
+        sync: false
       - key: GITHUB_REPOS
         value: dobroe345-cyber/GameDev-AI

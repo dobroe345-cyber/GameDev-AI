@@ -19,7 +19,7 @@ from db import Database
 
 log = logging.getLogger("gdai.tasks")
 
-ACTIVE = ("queued", "running")
+ACTIVE = ("queued", "running", "waiting")
 
 
 class TaskCancelled(Exception):
@@ -28,6 +28,10 @@ class TaskCancelled(Exception):
 
 class PermanentError(Exception):
     """Ошибка, которую бессмысленно повторять (неверные входные данные): задача сразу получает статус failed."""
+
+
+class WaitForUser(Exception):
+    """Агенту нужен ответ человека: задача встаёт в статус waiting (состояние уже сохранено) и ждёт POST /tasks/{id}/answer."""
 
 
 class TaskInterrupted(Exception):
@@ -137,11 +141,37 @@ class TaskStore:
         params.append(tid)
         return self.db.execute(f"UPDATE tasks SET {sets} WHERE id = ? AND status = 'running'", params) > 0
 
+    def wait_for_user(self, tid: str) -> bool:
+        """running -> waiting. Попытка не расходуется: ожидание ответа не ошибка."""
+        return self.db.execute(
+            "UPDATE tasks SET status = 'waiting', lease_until = 0, updated_at = ?, "
+            "attempts = CASE WHEN attempts > 0 THEN attempts - 1 ELSE 0 END WHERE id = ? AND status = 'running'",
+            (time.time(), tid),
+        ) > 0
+
+    def answer(self, tid: str, answer: dict, qid: int | None = None) -> str:
+        """Кладёт ответ человека в состояние и возвращает задачу в очередь. Возвращает 'ok' | 'not_waiting' | 'stale'."""
+        now = time.time()
+        with self.db.tx() as tx:
+            row = tx.one("SELECT state, status FROM tasks WHERE id = ?", (tid,))
+            if not row or row["status"] != "waiting":
+                return "not_waiting"
+            state = _j(row["state"], {})
+            q = state.get("question")
+            if not q or (qid is not None and q.get("id") != qid):
+                return "stale"
+            state["answer"] = answer
+            tx.execute("UPDATE tasks SET status = 'queued', state = ?, run_after = 0, lease_until = 0, updated_at = ? "
+                       "WHERE id = ? AND status = 'waiting'", (json.dumps(state, ensure_ascii=False), now, tid))
+            tx.execute("INSERT INTO task_events (task_id, ts, level, message) VALUES (?, ?, 'info', ?)",
+                       (tid, now, "Ответ получен: " + ("«решай сам»" if answer.get("auto") else answer.get("text", "")[:120])))
+        return "ok"
+
     def cancel(self, tid: str) -> bool:
         now = time.time()
         ok = self.db.execute(
             "UPDATE tasks SET status = 'cancelled', lease_until = 0, finished_at = ?, updated_at = ? "
-            "WHERE id = ? AND status IN ('queued', 'running')",
+            "WHERE id = ? AND status IN ('queued', 'running', 'waiting')",
             (now, now, tid),
         ) > 0
         if ok:
@@ -354,6 +384,9 @@ class TaskWorker:
                 ctx.log("Готово")
         except TaskCancelled:
             ctx.log("Остановлена", "warn")
+        except WaitForUser:
+            self.store.wait_for_user(tid)
+            ctx.log("Жду ответа пользователя")
         except TaskInterrupted:
             self.store.requeue(tid, refund_attempt=True)
             ctx.log("Сервис останавливается: задача вернётся в очередь", "warn")

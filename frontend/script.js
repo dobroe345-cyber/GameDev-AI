@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const VERSION = '2026-11-17.1';
+  const VERSION = '2026-11-18.1';
   const $ = (s, r = document) => r.querySelector(s);
   const ico = (n, cls = '') => `<svg class="i ${cls}" aria-hidden="true"><use href="#i-${n}"/></svg>`;
   const store = {
@@ -24,8 +24,19 @@
   let abortCtl = null;
   let busy = false;
   let agentOn = !!store.get('gdai.agent', false);
+  let agentTarget = store.get('gdai.agentTarget', 'project') === 'github' ? 'github' : 'project';
+  let agentAsk = store.get('gdai.agentAsk', true) !== false;
   const agentTimers = new Map();   // id задачи -> таймер опроса
   const TERMINAL = ['done', 'failed', 'cancelled'];
+  const AUTH_MSG = 'Сервер не принял вход. Открой Настройки → Подключение и войди по почте заново (или проверь токен).';
+  const fmtNum = n => Number(n || 0).toLocaleString('ru-RU');
+  function fmtDur(sec) {
+    sec = Math.max(0, Math.round(sec));
+    if (sec < 60) return sec + ' с';
+    if (sec < 3600) return Math.floor(sec / 60) + ' мин ' + (sec % 60 ? (sec % 60) + ' с' : '');
+    const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+    return h + ' ч' + (m ? ' ' + m + ' мин' : '');
+  }
 
   const els = {
     app: $('#app'), list: $('#chatList'), messages: $('#messages'), input: $('#input'),
@@ -129,7 +140,8 @@
     if (m.role === 'user') body.innerHTML = block(m.content).replace(/<h[1-3]>/g, '<p>').replace(/<\/h[1-3]>/g, '</p>');
     else if (m.task && !TERMINAL.includes(m.task.status)) body.innerHTML = agentCard(m);
     else body.innerHTML = md(m.content || '') + (m.error ? `<p class="error-text">${esc(m.error)}</p>` : '')
-      + (m.task && m.task.status !== 'done' && m.task.id ? `<button class="btn small" type="button" data-a="agent-retry">${ico('refresh')}<span>Запустить снова</span></button>` : '');
+      + (m.task && m.task.status !== 'done' && m.task.id ? `<button class="btn small" type="button" data-a="agent-retry">${ico('refresh')}<span>Запустить снова</span></button>` : '')
+      + ((m.task?.status === 'done' && m.task.project) || m.project ? projectActions() : '');
     body.classList.toggle('typing', streaming);
   }
 
@@ -280,16 +292,33 @@
   /* ---------- Агент: правки кода в GitHub (задача «code» на сервере) ---------- */
   const tfirst = s => String(s || '').split('\n')[0].slice(0, 300);
 
-  function agentCard(m) {
-    const t = m.task, pct = Math.round(Math.max(0.03, Math.min(1, t.progress || 0)) * 100);
-    const head = t.status === 'queued' ? (t.retry ? 'Жду повтора' : 'Жду очереди') : 'Агент работает';
+  function logHtml(t) {
     const rows = (t.events || []).slice(-7).map((e, i, a) =>
       `<li class="${e.l === 'warn' || e.l === 'error' ? 'warn' : ''}${i === a.length - 1 ? ' now' : ''}">${esc(e.m)}</li>`).join('');
+    return `<ul class="agent-log">${rows || '<li class="now">Ок, приступаю…</li>'}</ul>`;
+  }
+
+  function askBlock(t) {
+    const q = t.question;
+    const opts = (q.options || []).map((o, i) => `<button class="opt" type="button" data-a="agent-opt" data-i="${i}">${esc(o)}</button>`).join('');
+    return `<div class="agent-ask" data-qid="${q.id}"><p class="ask-q">${esc(q.text)}</p>
+      ${opts ? `<div class="opts">${opts}</div>` : ''}
+      <div class="ask-row"><input class="ask-in" type="text" maxlength="300" enterkeyhint="send" placeholder="Или напиши свой ответ" value="${esc(t.draft || '')}"><button class="btn small primary" type="button" data-a="agent-send">Ответить</button></div>
+      <button class="btn small auto" type="button" data-a="agent-auto" title="Агент сам выберет разумный вариант и больше спрашивать не будет">${ico('spark')}<span>Решай сам</span></button></div>`;
+  }
+
+  function projectActions() {
+    return `<div class="agent-actions"><button class="btn small" type="button" data-a="proj-open">${ico('play')}<span>Открыть</span></button><button class="btn small" type="button" data-a="proj-zip">${ico('download')}<span>Скачать .zip</span></button></div>`;
+  }
+
+  function agentCard(m) {
+    const t = m.task, asking = t.status === 'waiting' && t.question, pct = Math.round(Math.max(0.03, Math.min(1, t.progress || 0)) * 100);
+    const head = asking ? 'Агент ждёт твоего ответа' : t.status === 'queued' && !t.answered ? (t.retry ? 'Жду повтора' : 'Жду очереди') : 'Агент работает';
     const note = t.offline ? '<p class="agent-note">Нет связи с сервером — задача продолжается там, интерфейс догонит, когда связь вернётся.</p>'
       : t.retry ? `<p class="agent-note">${esc(t.retry)}</p>` : '';
-    return `<div class="agent-card"><div class="agent-head">${ico('agent')}<strong>${head}</strong><span class="agent-pct">${pct}%</span>
+    return `<div class="agent-card${asking ? ' asking' : ''}"><div class="agent-head">${ico('agent')}<strong>${head}</strong><span class="agent-pct">${pct}%</span>
       <button class="btn small" type="button" data-a="agent-cancel">Остановить</button></div>
-      <div class="agent-bar"><i style="width:${pct}%"></i></div>${note}<ul class="agent-log">${rows || '<li class="now">Запускаю…</li>'}</ul></div>`;
+      <div class="agent-bar"><i style="width:${pct}%"></i></div>${asking ? askBlock(t) : ''}${note}${logHtml(t)}</div>`;
   }
 
   async function agentApi(path, method = 'GET', body) {
@@ -302,16 +331,23 @@
     if (chat.id !== activeId) return;
     if (full) { renderMessages(); return; }
     const node = els.messages.querySelector(`.msg[data-idx="${chat.messages.indexOf(msg)}"]`);
-    if (node) { setBody(node, msg); scrollBottom(); }
+    if (!node) return;
+    const t = msg.task, card = $('.agent-card', node), ask = card && $('.agent-ask', card);
+    // Пока вопрос тот же, его не перерисовываем: иначе пропадёт то, что человек уже печатает
+    if (t && t.status === 'waiting' && t.question && ask && ask.dataset.qid === String(t.question.id)) {
+      const log = $('.agent-log', card); if (log) log.outerHTML = logHtml(t);
+      return;
+    }
+    setBody(node, msg); scrollBottom();
   }
 
   async function startAgent(chat, goal) {
     const msg = { role: 'assistant', content: '', ts: Date.now(), task: { id: null, status: 'queued', progress: 0, events: [] } };
     chat.messages.push(msg); saveChats(); renderMessages();
-    toast('Агент запущен: он откроет pull request, main не трогает');
+    toast(agentTarget === 'github' ? 'Агент запущен: он откроет pull request, main не трогает' : 'Агент запущен: файлы сохранятся в проекте на сервере');
     try {
-      const r = await agentApi('/api/tasks', 'POST', { kind: 'code', title: goal.slice(0, 60), chat_id: chat.id, payload: { goal, chat_id: chat.id, max_steps: 16 } });
-      if (r.status === 401) throw new Error('Сервер не принял токен. Проверь «Токен доступа» в Настройках.');
+      const r = await agentApi('/api/tasks', 'POST', { kind: 'code', title: goal.slice(0, 60), chat_id: chat.id, payload: { goal, chat_id: chat.id, max_steps: 16, mode: agentTarget, ask: agentAsk } });
+      if (r.status === 401) throw new Error(AUTH_MSG);
       if (!r.ok) throw new Error(r.status === 400 ? 'Сервер старой версии: обнови сервер на Render (Manual Deploy).' : 'Сервер ответил HTTP ' + r.status);
       msg.task.id = (await r.json()).id;
       setConn('ok', 'Сервер на связи');
@@ -327,7 +363,8 @@
     k.status = t.status; k.progress = t.progress || 0; k.offline = false;
     k.events = (t.events || []).slice(-8).map(e => ({ m: e.message, l: e.level }));
     k.retry = t.status === 'queued' && t.error ? tfirst(t.error) : '';
-    if (t.status === 'done') { msg.content = t.result?.final || 'Готово.'; msg.error = ''; k.pr = t.result?.pr || null; }
+    k.question = t.status === 'waiting' ? (t.state?.question || null) : null;
+    if (t.status === 'done') { msg.content = t.result?.final || 'Готово.'; msg.error = ''; k.pr = t.result?.pr || null; k.project = t.result?.project || null; }
     else if (t.status === 'failed') { msg.error = tfirst(t.error) || 'Задача не выполнена'; }
     else if (t.status === 'cancelled') { msg.content = '_(агент остановлен)_'; msg.error = ''; }
   }
@@ -342,7 +379,7 @@
       try {
         const r = await fetch(backendUrl() + '/api/tasks/' + encodeURIComponent(id), { headers: authHeaders() });
         if (r.status === 404) { msg.task.status = 'failed'; msg.error = 'Сервер не знает эту задачу (база данных была пуста после перезапуска). Запусти заново.'; }
-        else if (r.status === 401) { msg.task.status = 'failed'; msg.error = 'Сервер не принял токен. Проверь «Токен доступа» в Настройках.'; }
+        else if (r.status === 401) { msg.task.status = 'failed'; msg.error = AUTH_MSG; }
         else if (!r.ok) throw new Error('HTTP ' + r.status);
         else { fails = 0; applyTask(chat, msg, await r.json()); }
       } catch { fails++; msg.task.offline = true; delay = Math.min(15000, 3000 * fails); }
@@ -361,23 +398,90 @@
 
   async function agentAction(btn) {
     const chat = active(); if (!chat) return;
-    const msg = chat.messages[+btn.closest('.msg').dataset.idx]; if (!msg?.task?.id) return;
+    const msg = chat.messages[+btn.closest('.msg').dataset.idx]; if (!msg) return;
     const act = btn.dataset.a;
+    if (act === 'proj-open') return openPreview(msg.task?.project || msg.project || chat.id, chat.title);
+    if (act === 'proj-zip') return downloadZip(msg.task?.project || msg.project || chat.id, chat.title);
+    if (!msg.task?.id) return;
+    if (act === 'agent-opt' || act === 'agent-send' || act === 'agent-auto') return agentAnswer(btn, chat, msg);
     try {
       const r = await agentApi('/api/tasks/' + encodeURIComponent(msg.task.id) + (act === 'agent-cancel' ? '/cancel' : '/retry'), 'POST');
       if (!r.ok) { toast('Сервер ответил HTTP ' + r.status); return; }
       const j = await r.json().catch(() => ({}));
       if (act === 'agent-retry' && !j.retried) { toast('Эту задачу нельзя перезапустить: напиши её заново'); return; }
       if (act === 'agent-retry') { msg.task.status = 'queued'; msg.error = ''; msg.content = ''; saveChats(); renderMessages(); trackTask(chat, msg); }
-      else toast('Останавливаю…');
+      else { toast('Останавливаю…'); trackTask(chat, msg); }
     } catch (e) { toast(e.message || 'Нет связи с сервером'); }
+  }
+
+  // Ответ на вопрос агента: вариант, свой текст или «Решай сам»
+  async function agentAnswer(btn, chat, msg) {
+    const t = msg.task, q = t.question, card = btn.closest('.agent-ask'); if (!q || !card) return;
+    const act = btn.dataset.a, body = { qid: q.id, text: '', auto: false };
+    let shown;
+    if (act === 'agent-auto') { body.auto = true; shown = 'Решай сам'; }
+    else if (act === 'agent-opt') shown = body.text = String((q.options || [])[+btn.dataset.i] || '');
+    else shown = body.text = ($('.ask-in', card).value || '').trim();
+    if (!shown) { toast('Выбери вариант или напиши ответ'); return; }
+    const lock = v => card.querySelectorAll('button, input').forEach(x => { x.disabled = v; });
+    lock(true);
+    try {
+      const r = await agentApi('/api/tasks/' + encodeURIComponent(t.id) + '/answer', 'POST', body);
+      if (r.status === 401) throw new Error(AUTH_MSG);
+      if (r.status === 409) { toast('Этот вопрос уже не актуален, обновляю…'); lock(false); trackTask(chat, msg); return; }
+      if (!r.ok) throw new Error('Сервер ответил HTTP ' + r.status);
+    } catch (e) { toast(e.message || 'Нет связи с сервером'); lock(false); return; }
+    t.status = 'queued'; t.question = null; t.draft = ''; t.answered = true;
+    t.events = [...(t.events || []), { m: 'Ты: ' + shown, l: 'info' }].slice(-8);
+    saveChats(); repaint(chat, msg, false); trackTask(chat, msg);
+  }
+
+  /* ---------- Проект агента на сервере: предпросмотр и zip ---------- */
+  let previewPid = '', previewTitle = '';
+  async function projectFetch(pid, what) {
+    const r = await agentApi('/api/projects/' + encodeURIComponent(pid) + '/' + what);
+    if (r.status === 401) throw new Error(AUTH_MSG);
+    if (r.status === 404) throw new Error(what === 'preview' ? 'В проекте нет html-файла, открывать нечего. Можно скачать .zip' : 'Проект пуст или удалён (без базы данных он пропадает при перезапуске сервера)');
+    if (!r.ok) throw new Error('Сервер ответил HTTP ' + r.status);
+    return r;
+  }
+  async function openPreview(pid, title) {
+    try {
+      const html = await (await projectFetch(pid, 'preview')).text();
+      previewPid = pid; previewTitle = title || '';
+      $('#previewTitle').textContent = title ? 'Предпросмотр: ' + title.slice(0, 40) : 'Предпросмотр';
+      $('#previewFrame').srcdoc = html;
+      $('#preview').classList.remove('hidden');
+    } catch (e) { toast(e.message || 'Не удалось открыть проект'); }
+  }
+  function closePreview() { $('#preview').classList.add('hidden'); $('#previewFrame').srcdoc = ''; }   // пустой srcdoc останавливает игру и звук
+  async function reloadPreview() {
+    try { const html = await (await projectFetch(previewPid, 'preview')).text(); const f = $('#previewFrame'); f.srcdoc = ''; setTimeout(() => { f.srcdoc = html; }, 30); }
+    catch (e) { toast(e.message || 'Не удалось обновить'); }
+  }
+  async function downloadZip(pid, title) {
+    try {
+      const blob = await (await projectFetch(pid, 'zip')).blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = ((title || '').replace(/[^\wЀ-ӿ-]+/g, '_').replace(/^_+|_+$/g, '') || 'project') + '.zip';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    } catch (e) { toast(e.message || 'Не удалось скачать'); }
   }
 
   function renderAgentToggle() {
     const b = $('#agentBtn');
     b.classList.toggle('on', agentOn); b.setAttribute('aria-pressed', agentOn);
-    els.input.placeholder = agentOn ? 'Что изменить в коде?' : 'Напиши задачу…';
-    $('#hint').textContent = agentOn ? 'Агент не пишет в main: он открывает pull request, а Merge нажимаешь ты в GitHub.' : 'ИИ может ошибаться, проверяй код.';
+    $('#agentOpts').classList.toggle('hidden', !agentOn);
+    $('#agentAsk').checked = agentAsk;
+    document.querySelectorAll('#agentOpts [data-target]').forEach(x => {
+      const on = x.dataset.target === agentTarget; x.classList.toggle('on', on); x.setAttribute('aria-pressed', on);
+    });
+    els.input.placeholder = !agentOn ? 'Напиши задачу…' : agentTarget === 'github' ? 'Что изменить в коде?' : 'Что создать? Например: html-игра';
+    $('#hint').textContent = !agentOn ? 'ИИ может ошибаться, проверяй код.'
+      : agentTarget === 'github' ? 'Агент не пишет в main: он открывает pull request, а Merge нажимаешь ты в GitHub.'
+        : 'Агент сохраняет файлы в проект на сервере: после ответа их можно открыть и скачать .zip.';
   }
 
   async function githubInfo() {
@@ -385,12 +489,21 @@
     try { const r = await agentApi('/api/status'); return r.ok ? (await r.json()).github || null : null; } catch { return null; }
   }
 
+  async function githubWarn() {
+    const g = await githubInfo();
+    if (g && !g.connected) toast('GitHub не подключён: в Render → Environment добавь GITHUB_TOKEN (docs/GITHUB.md) или выбери «Проект»');
+  }
+
   async function toggleAgent() {
     agentOn = !agentOn; store.set('gdai.agent', agentOn); renderAgentToggle();
     if (!agentOn) return;
     if (settings.provider !== 'backend' || !backendUrl()) { toast('Агенту нужен твой сервер: выбери «Свой сервер» в Настройках'); return; }
-    const g = await githubInfo();
-    if (g && !g.connected) toast('GitHub не подключён: в Render → Environment добавь GITHUB_TOKEN (docs/GITHUB.md)');
+    if (agentTarget === 'github') githubWarn();
+  }
+
+  function setTarget(t) {
+    agentTarget = t === 'github' ? 'github' : 'project'; store.set('gdai.agentTarget', agentTarget); renderAgentToggle();
+    if (agentTarget === 'github') githubWarn();
   }
 
   async function streamBackend(chat, history, msg, update, signal) {
@@ -414,7 +527,7 @@
       if (e.name === 'AbortError') throw e;
       throw new Error('Не удалось подключиться к серверу (адрес, интернет или CORS). Сообщение сохранено только на этом устройстве.');
     } finally { clearTimeout(wake); }
-    if (res.status === 401) throw new Error('Сервер не принял токен. Проверь «Токен доступа» в Настройках.');
+    if (res.status === 401) throw new Error(AUTH_MSG);
     if (res.status === 503) throw new Error('Сейчас нет доступных моделей (GPU выключен, резервные не настроены). Вопрос сохранён на сервере, повтори позже.');
     if (!res.ok) throw new Error('Сервер ответил HTTP ' + res.status);
     setConn('ok', 'Сервер на связи');
@@ -468,12 +581,12 @@
           if (!rr.ok) continue;
           const full = await rr.json();
           if ((full.messages || []).length <= local.messages.length) continue;
-          local.messages = serverMessages(full.messages); changed = true;
+          local.messages = serverMessages(full.messages, id); changed = true;
         } else if (!local) {
           const rr = await fetch(backendUrl() + '/api/chats/' + encodeURIComponent(id), { headers: authHeaders() });
           if (!rr.ok) continue;
           const full = await rr.json();
-          chats.push({ id, title: full.title || rc.title || 'Чат', messages: serverMessages(full.messages), created: (rc.created_at || 0) * 1000 || Date.now() });
+          chats.push({ id, title: full.title || rc.title || 'Чат', messages: serverMessages(full.messages, id), created: (rc.created_at || 0) * 1000 || Date.now() });
           changed = true;
         }
       }
@@ -485,9 +598,10 @@
     } catch { /* сервер спит или недоступен: работаем с локальной копией */ }
   }
 
-  function serverMessages(list) {
+  function serverMessages(list, chatId) {
     return (list || []).map(m => {
       const o = { role: m.role, content: m.content || '', ts: (m.ts || 0) * 1000 || Date.now() };
+      if (m.role === 'assistant' && chatId && o.content.includes('Проект сохранён на сервере')) o.project = chatId;   // кнопки «Открыть» и «.zip» и на другом устройстве
       if (m.status === 'interrupted') o.content += (o.content ? '\n\n' : '') + '_(ответ оборвался, нажми «повторить»)_';
       return o;
     });
@@ -646,6 +760,7 @@
       b.classList.toggle('on', on); b.setAttribute('aria-selected', on);
     });
     document.querySelectorAll('.settings-body > section[data-tab]').forEach(sec => sec.classList.toggle('hidden', sec.dataset.tab !== name));
+    if (name === 'limits') startLimits(); else stopLimits();
   }
 
   let toastTimer = null;
@@ -653,7 +768,7 @@
     els.toast.textContent = text;
     els.toast.classList.remove('hidden');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => els.toast.classList.add('hidden'), 1800);
+    toastTimer = setTimeout(() => els.toast.classList.add('hidden'), Math.min(7000, Math.max(1800, text.length * 55)));
   }
 
   function applyFont() {
@@ -704,20 +819,24 @@
     $('#sFont').value = settings.fontSize;
     $('#sEnter').checked = !!settings.enterSend;
     $('#testResult').textContent = '';
+    $('#sEmail').value = settings.email || '';
+    $('#sCode').value = ''; $('#codeRow').classList.add('hidden'); $('#codeBtns').classList.add('hidden');
+    authMsg(''); renderAuth(); loadAuthInfo();
     $('#appVersion').textContent = 'Версия интерфейса: ' + VERSION;
     const gs = $('#ghStatus'); gs.textContent = '';
     githubInfo().then(g => { if (g) gs.textContent = g.connected ? 'GitHub для агента: подключён (' + g.repos.join(', ') + ')' : 'GitHub для агента: не подключён. Добавь GITHUB_TOKEN в Render → Environment.'; });
-    hidePop(); showTab('conn');
+    hidePop(); closeMenu(); showTab('conn');       // на телефоне боковое меню не должно оставаться открытым под окном
     els.modal.classList.remove('hidden');
   }
 
-  function closeSettings() { els.modal.classList.add('hidden'); }
+  function closeSettings() { els.modal.classList.add('hidden'); stopLimits(); }
 
   function saveSettings() {
     const temp = parseFloat($('#sTemp').value);
     settings = {
       backend: $('#sBackend').value.trim(),
       token: $('#sToken').value.trim(),
+      email: settings.email || '',
       provider: $('#sProvider').value,
       apiKey: $('#sKey').value.trim(),
       baseUrl: $('#sBase').value.trim(),
@@ -782,6 +901,156 @@
     } catch { out.textContent = '✗ Не удалось подключиться (адрес / CORS?)'; }
   }
 
+  /* ---------- Вход по почте ---------- */
+  const isSession = t => /^gdai_/.test(t || '');
+  const loggedEmail = () => (isSession(settings.token) && settings.email) || '';
+  const formBase = () => ($('#sBackend').value || '').trim().replace(/\/+$/, '');
+  function authMsg(text, bad) { const o = $('#authMsg'); o.textContent = text || ''; o.classList.toggle('bad', !!bad); }
+
+  function renderAuth() {
+    const who = loggedEmail();
+    $('#authIn').classList.toggle('hidden', !!who);
+    $('#authOut').classList.toggle('hidden', !who);
+    $('#authWho').textContent = who;
+    $('#authHint').textContent = !who && $('#sToken').value.trim() && !isSession($('#sToken').value.trim())
+      ? 'Токен доступа уже введён: эта почта привяжется к серверу, и дальше токен не понадобится.' : '';
+  }
+
+  async function authCall(path, body) {
+    const base = formBase();
+    if (!base) throw new Error('Сначала укажи адрес своего сервера выше');
+    if (location.protocol === 'https:' && base.startsWith('http:')) throw new Error('Сайт на HTTPS не может обращаться к http-серверу. Нужен адрес https://…');
+    const tok = $('#sToken').value.trim();
+    const go = () => fetch(base + path, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(tok ? { Authorization: 'Bearer ' + tok } : {}) }, body: JSON.stringify(body) });
+    let r;
+    try { r = await go(); }
+    catch {
+      authMsg('Сервер просыпается, это займёт до минуты…');
+      if (!(await wakeServerAt(base))) throw new Error('Сервер не ответил. Проверь адрес и CORS_ORIGINS в Render.');
+      r = await go();
+    }
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(String(j.detail || j.error || j.message || 'Сервер ответил HTTP ' + r.status));
+    return j;
+  }
+
+  let resendTimer = null;
+  function holdResend(sec) {
+    const btn = $('#mailSend'), label = btn.querySelector('span');
+    clearInterval(resendTimer);
+    let left = sec; btn.disabled = true;
+    const tick = () => {
+      if (left <= 0) { clearInterval(resendTimer); btn.disabled = false; label.textContent = 'Отправить код ещё раз'; return; }
+      label.textContent = `Ещё раз через ${left} с`; left--;
+    };
+    tick(); resendTimer = setInterval(tick, 1000);
+  }
+
+  async function mailSend() {
+    const email = $('#sEmail').value.trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { authMsg('Введи почту целиком, например you@gmail.com', true); return; }
+    const btn = $('#mailSend'); btn.disabled = true; authMsg('Отправляю код…');
+    try {
+      const j = await authCall('/api/auth/request', { email });
+      $('#codeRow').classList.remove('hidden'); $('#codeBtns').classList.remove('hidden'); $('#sCode').focus();
+      authMsg(j.link ? `Код отправлен на ${email}. Введи его, чтобы привязать почту к серверу. Загляни и в «Спам».`
+        : `Если эта почта разрешена на сервере, код уже отправлен на ${email}. Он действует 10 минут. Загляни и в «Спам».`);
+      holdResend(45);
+    } catch (e) { authMsg(e.message, true); btn.disabled = false; }
+  }
+
+  async function mailVerify() {
+    const email = $('#sEmail').value.trim().toLowerCase(), code = $('#sCode').value.replace(/\D/g, '');
+    if (code.length !== 6) { authMsg('Код — 6 цифр из письма', true); return; }
+    const btn = $('#mailVerify'); btn.disabled = true; authMsg('Проверяю код…');
+    try {
+      const j = await authCall('/api/auth/verify', { email, code });
+      settings = { ...settings, provider: 'backend', backend: formBase(), token: j.token, email: j.email || email };
+      store.set('gdai.settings', settings);
+      $('#sProvider').value = 'backend'; syncProviderFields(); $('#sToken').value = j.token;
+      $('#sCode').value = ''; $('#codeRow').classList.add('hidden'); $('#codeBtns').classList.add('hidden');
+      clearInterval(resendTimer); $('#mailSend').disabled = false; $('#mailSend span').textContent = 'Получить код';
+      authMsg(''); renderAuth(); renderBadge(); $('#tokenBox').open = false;
+      toast(j.linked ? 'Почта привязана, вы вошли' : 'Вы вошли');
+      syncFromServer(); checkServer(); resumeTasks();
+    } catch (e) { authMsg(e.message, true); }
+    finally { btn.disabled = false; }
+  }
+
+  async function mailLogout() {
+    const base = backendUrl() || formBase();
+    if (base && isSession(settings.token)) { try { await fetch(base + '/api/auth/logout', { method: 'POST', headers: authHeaders() }); } catch { /* сервер спит: токен всё равно забываем здесь */ } }
+    settings = { ...settings, token: '', email: '' }; store.set('gdai.settings', settings);
+    $('#sToken').value = ''; renderAuth(); renderBadge(); checkServer(); toast('Вы вышли');
+  }
+
+  async function loadAuthInfo() {
+    const base = formBase(), note = $('#authHint');
+    $('#tokenBox').open = !loggedEmail() && !!$('#sToken').value.trim();
+    if (!base || $('#sProvider').value !== 'backend') return;
+    try {
+      const r = await fetch(base + '/api/auth/info'); if (!r.ok) return;
+      if (!(await r.json()).email_login) { note.textContent = 'На сервере вход по почте ещё не включён: добавь MAIL_API_KEY в Render (docs/AUTH.md). Пока входи по токену ниже.'; $('#tokenBox').open = true; }
+    } catch { /* сервер спит: узнаем при нажатии «Получить код» */ }
+  }
+
+  /* ---------- Лимиты ---------- */
+  let limTimer = null, limTicks = 0, limAt = 0;
+  const cd = (sec) => `<b class="cd" data-end="${limAt + sec * 1000}">${fmtDur(sec)}</b>`;
+
+  function limRow(label, k) {
+    const frac = k.limit ? Math.max(0, Math.min(1, k.remaining / k.limit)) : 0;
+    const sub = k.reset_passed ? 'лимит уже восстановился; точная цифра появится после следующего ответа ИИ'
+      : k.reset_in_s == null ? '' : 'сброс через ' + cd(k.reset_in_s);
+    return `<div class="lim-row"><div class="lim-top"><span>${label}</span><span>${k.reset_passed ? '≥ ' : ''}<b>${fmtNum(k.remaining)}</b> из ${fmtNum(k.limit)}</span></div>
+      <div class="meter${frac < 0.2 && !k.reset_passed ? ' low' : ''}"><i style="width:${(frac * 100).toFixed(1)}%"></i></div><div class="lim-sub">${sub}</div></div>`;
+  }
+
+  function renderLimits(d) {
+    limAt = Date.now();
+    const parts = (d.providers || []).map(p => {
+      const rows = (p.requests ? limRow('Запросов осталось', p.requests) : '') + (p.tokens ? limRow('Токенов осталось', p.tokens) : '');
+      const body = p.data ? (rows || '<p class="lim-sub">Сервис не сообщает лимиты в ответах.</p>')
+        : '<p class="lim-sub">Данных пока нет: отправь любое сообщение через сервер, и после ответа ИИ здесь появятся остатки.</p>';
+      return `<div class="lim-card"><div class="lim-title"><strong>${esc(p.label)}</strong><span class="muted">${esc(p.model || '')}</span></div>${body}
+        ${p.retry_in_s ? `<p class="lim-warn">Сервис просит подождать ещё ${cd(p.retry_in_s)}</p>` : ''}
+        ${p.data ? `<p class="lim-sub">данные обновлены ${fmtDur(p.seen_ago_s)} назад</p>` : ''}</div>`;
+    });
+    if (!parts.length) parts.push('<div class="lim-card"><p class="lim-sub">Нет настроенных моделей (проверь GPU_BASE_URL и ключ в Render).</p></div>');
+    const u = d.usage || {}, at = new Date(limAt + (u.reset_in_s || 0) * 1000);
+    const days = (u.last_days || []).slice(0, 7).map(x => `<div>${esc(x.day)} — ${fmtNum(x.requests)} запр., ≈ ${fmtNum(x.approx_tokens)} ток.</div>`).join('');
+    parts.push(`<div class="lim-card"><div class="lim-title"><strong>Расход через этот сервер</strong><span class="muted">сегодня (по UTC)</span></div>
+      <div class="lim-row"><div class="lim-top"><span>Запросов</span><b>${fmtNum(u.requests)}</b></div></div>
+      <div class="lim-row"><div class="lim-top"><span>Токенов (оценка)</span><b>≈ ${fmtNum(u.approx_tokens)}</b></div></div>
+      <div class="lim-sub">новый счёт через ${cd(u.reset_in_s || 0)} (в ${at.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })} по твоему времени)</div>
+      ${days ? `<details><summary class="lim-sub">Последние дни</summary><div class="lim-days">${days}</div></details>` : ''}</div>
+      <p class="lim-sub">Токены считаются приблизительно (по длине текста). Запросы у бесплатных сервисов обычно считаются за сутки, токены — за минуту.</p>`);
+    $('#limBody').innerHTML = parts.join('');
+  }
+
+  async function loadLimits() {
+    const box = $('#limBody');
+    if (settings.provider !== 'backend' || !backendUrl()) { box.innerHTML = '<p class="muted">Лимиты показывает твой сервер: выбери «Свой сервер», укажи адрес, войди и нажми «Сохранить».</p>'; return; }
+    if (!settings.token) { box.innerHTML = '<p class="muted">Сначала войди по почте (вкладка «Подключение») или укажи токен.</p>'; return; }
+    try {
+      const r = await agentApi('/api/limits');
+      if (r.status === 401) { box.innerHTML = `<p class="muted bad">${esc(AUTH_MSG)}</p>`; return; }
+      if (r.status === 404) { box.innerHTML = '<p class="muted">Сервер старой версии, лимитов нет: обнови его на Render (Manual Deploy).</p>'; return; }
+      if (!r.ok) { box.innerHTML = `<p class="muted bad">Сервер ответил HTTP ${r.status}</p>`; return; }
+      renderLimits(await r.json());
+    } catch (e) { box.innerHTML = `<p class="muted bad">${esc(e.message || 'Нет связи с сервером')}</p>`; }
+  }
+
+  function tickLimits() {
+    document.querySelectorAll('#limBody .cd').forEach(el => {
+      const left = Math.round((+el.dataset.end - Date.now()) / 1000);
+      el.textContent = left > 0 ? fmtDur(left) : 'сейчас';
+    });
+    if (++limTicks % 20 === 0) loadLimits();               // раз в 20 секунд подтягиваем свежие цифры
+  }
+  function startLimits() { stopLimits(); limTicks = 0; $('#limBody').innerHTML = '<p class="muted">Загружаю…</p>'; loadLimits(); limTimer = setInterval(tickLimits, 1000); }
+  function stopLimits() { clearInterval(limTimer); limTimer = null; }
+
   /* ---------- Events ---------- */
   els.form.addEventListener('submit', e => { e.preventDefault(); send(); });
   els.input.addEventListener('input', autosize);
@@ -796,6 +1065,22 @@
   window.addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer?.files?.length) addFiles([...e.dataTransfer.files]); });
 
   $('#agentBtn').onclick = toggleAgent;
+  $('#agentOpts').addEventListener('click', e => { const b = e.target.closest('[data-target]'); if (b) setTarget(b.dataset.target); });
+  $('#agentAsk').addEventListener('change', e => { agentAsk = e.target.checked; store.set('gdai.agentAsk', agentAsk); });
+  $('#mailSend').onclick = mailSend;
+  $('#mailVerify').onclick = mailVerify;
+  $('#mailLogout').onclick = mailLogout;
+  $('#sCode').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); mailVerify(); } });
+  $('#sEmail').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); mailSend(); } });
+  $('#sToken').addEventListener('input', renderAuth);
+  let infoTimer = null;     // адрес сервера вводят уже после открытия настроек: проверяем, умеет ли он почту, когда ввод закончен
+  const recheckAuth = () => { clearTimeout(infoTimer); infoTimer = setTimeout(loadAuthInfo, 600); };
+  $('#sBackend').addEventListener('input', recheckAuth);
+  $('#sProvider').addEventListener('change', recheckAuth);
+  $('#limRefresh').onclick = loadLimits;
+  $('#closePreview').onclick = closePreview;
+  $('#previewReload').onclick = reloadPreview;
+  $('#preview').addEventListener('click', e => { if (e.target === $('#preview')) closePreview(); });
   $('#newChat').onclick = newChat;
   $('#menuBtn').onclick = toggleSide;
   $('#closeSide').onclick = hideSide;
@@ -824,7 +1109,7 @@
       copyText(code).then(() => flash(copy));
       return;
     }
-    const ab = e.target.closest('[data-a^="agent-"]');
+    const ab = e.target.closest('[data-a^="agent-"], [data-a^="proj-"]');
     if (ab) { agentAction(ab); return; }
     const t = e.target.closest('.msg-tools button'); if (!t) return;
     if (t.dataset.a === 'regen') regenerate();
@@ -832,6 +1117,16 @@
       const m = active()?.messages[+t.closest('.msg').dataset.idx];
       if (m) copyText(m.content).then(() => flash(t));
     }
+  });
+
+  // набранный, но ещё не отправленный ответ агенту не теряется при перерисовке
+  els.messages.addEventListener('input', e => {
+    const inp = e.target.closest('.ask-in'); if (!inp) return;
+    const m = active()?.messages[+inp.closest('.msg').dataset.idx]; if (m?.task) m.task.draft = inp.value;
+  });
+  els.messages.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' || e.isComposing || !e.target.closest('.ask-in')) return;
+    e.preventDefault(); e.target.closest('.agent-ask').querySelector('[data-a=agent-send]').click();
   });
 
   els.messages.addEventListener('scroll', () => els.toBottom.classList.toggle('hidden', nearBottom()));
@@ -852,7 +1147,7 @@
 
   document.addEventListener('keydown', e => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); newChat(); }
-    if (e.key === 'Escape') { hidePop(); closeMenu(); closeSettings(); }
+    if (e.key === 'Escape') { hidePop(); closeMenu(); closeSettings(); closePreview(); }
   });
 
   /* ---------- Init ---------- */
